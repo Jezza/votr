@@ -1,0 +1,1040 @@
+/*
+ * Votr — Dark palette
+ *
+ * Base:        #0b0e14
+ * Surface:     #12151c
+ * Raised:      #1a1e28
+ * Border:      #252a36
+ * Text:        #7a8394
+ * Text bright: #9aa3b4
+ * Accent:      #5082c4
+ * Accent dim:  #3d6496
+ * Danger:      #c45050
+ * Success:     #50a878
+ * Gold:        #c4a050
+ */
+
+/* ─── Reset & Base ─────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0b0e14;
+  color: #7a8394;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── App Shell ─────────────────────────────────────────────────────── */
+
+.app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── Top Bar ───────────────────────────────────────────────────────── */
+
+.top-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  padding: 0 16px;
+  background: #12151c;
+  border-bottom: 1px solid #252a36;
+}
+
+.top-bar-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #9aa3b4;
+  letter-spacing: 0.04em;
+}
+
+.phase-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #3d6496;
+  color: #c8d8f0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* ─── Content Area ──────────────────────────────────────────────────── */
+
+.content-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.content-inner {
+  max-width: 600px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 32px;
+}
+
+/* ─── Card ──────────────────────────────────────────────────────────── */
+
+.card {
+  background: #12151c;
+  border: 1px solid #252a36;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ─── Section Title ─────────────────────────────────────────────────── */
+
+.section-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #9aa3b4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.results-title {
+  font-size: 1.25rem;
+  justify-content: center;
+}
+
+/* ─── Buttons ───────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, opacity 0.12s;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #5082c4;
+  border-color: #5082c4;
+  color: #fff;
+}
+
+.btn-primary:not(:disabled):hover {
+  background: #3d6496;
+  border-color: #3d6496;
+}
+
+.btn-small {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.btn-danger {
+  background: transparent;
+  border-color: #c45050;
+  color: #c45050;
+}
+
+.btn-danger:not(:disabled):hover,
+.btn-danger.btn-active {
+  background: #c45050;
+  border-color: #c45050;
+  color: #fff;
+}
+
+.btn-success {
+  background: #50a878;
+  border-color: #50a878;
+  color: #fff;
+}
+
+.btn-success:not(:disabled):hover {
+  background: #3d8a60;
+  border-color: #3d8a60;
+}
+
+.btn-outline {
+  background: transparent;
+  border-color: #252a36;
+  color: #7a8394;
+}
+
+.btn-outline:not(:disabled):hover {
+  border-color: #5082c4;
+  color: #9aa3b4;
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: #5082c4;
+}
+
+.btn-ghost:not(:disabled):hover {
+  background: rgba(80, 130, 196, 0.1);
+}
+
+.btn-full {
+  width: 100%;
+}
+
+.btn-large {
+  min-height: 52px;
+  font-size: 1rem;
+  border-radius: 10px;
+}
+
+.btn-icon {
+  min-width: 44px;
+  padding: 0 10px;
+  font-size: 1.1rem;
+}
+
+/* ─── Text Input ────────────────────────────────────────────────────── */
+
+.text-input {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  background: #1a1e28;
+  border: 1px solid #252a36;
+  border-radius: 8px;
+  color: #9aa3b4;
+  font-size: 1rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.text-input::placeholder {
+  color: #4a5264;
+}
+
+.text-input:focus {
+  border-color: #5082c4;
+}
+
+/* ─── Input Row ─────────────────────────────────────────────────────── */
+
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.input-row .text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.input-row .btn {
+  flex-shrink: 0;
+}
+
+/* ─── Field Label ───────────────────────────────────────────────────── */
+
+.field-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #7a8394;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ─── Name Entry / Display ──────────────────────────────────────────── */
+
+.name-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.name-display {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.name-display-text {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #9aa3b4;
+  flex: 1;
+}
+
+/* ─── Player List ───────────────────────────────────────────────────── */
+
+.player-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.player-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 0;
+  border-bottom: 1px solid #1a1e28;
+}
+
+.player-item:last-child {
+  border-bottom: none;
+}
+
+.player-name {
+  flex: 1;
+  color: #9aa3b4;
+  font-size: 0.95rem;
+}
+
+.you-label {
+  color: #5082c4;
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.disconnect-timer {
+  color: #c45050;
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.host-crown {
+  font-size: 1rem;
+}
+
+/* ─── Connected Dot ─────────────────────────────────────────────────── */
+
+.connected-dot {
+  font-size: 0.6rem;
+  line-height: 1;
+}
+
+.connected-dot--on {
+  color: #50a878;
+}
+
+.connected-dot--off {
+  color: #3a3f4e;
+}
+
+/* ─── Ready Dot ─────────────────────────────────────────────────────── */
+
+.ready-dot {
+  font-size: 0.85rem;
+  line-height: 1;
+  width: 20px;
+  text-align: center;
+}
+
+.ready-dot--on {
+  color: #50a878;
+}
+
+.ready-dot--off {
+  color: #3a3f4e;
+}
+
+/* ─── Game List ─────────────────────────────────────────────────────── */
+
+.game-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.game-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 12px;
+  background: #1a1e28;
+  border: 1px solid #252a36;
+  border-radius: 8px;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.game-item--vetoed {
+  border-color: rgba(196, 80, 80, 0.35);
+  background: rgba(196, 80, 80, 0.06);
+}
+
+.game-item--dim {
+  opacity: 0.55;
+}
+
+.game-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.game-item-name {
+  color: #9aa3b4;
+  font-size: 0.95rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.game-item-name--crossed {
+  text-decoration: line-through;
+  color: #4a5264;
+}
+
+.game-item-meta {
+  color: #4a5264;
+  font-size: 0.8rem;
+}
+
+/* ─── Veto Count Badge ──────────────────────────────────────────────── */
+
+.veto-count-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(196, 80, 80, 0.18);
+  color: #c45050;
+  font-size: 0.75rem;
+  font-weight: 600;
+  width: fit-content;
+}
+
+/* ─── Count Badge ───────────────────────────────────────────────────── */
+
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #252a36;
+  color: #5082c4;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* ─── Ranking List ──────────────────────────────────────────────────── */
+
+.ranking-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  counter-reset: ranking;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.ranking-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 60px;
+  padding: 10px 12px;
+  background: #1a1e28;
+  border: 1px solid #252a36;
+  border-radius: 8px;
+}
+
+.ranking-position {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #5082c4;
+  min-width: 24px;
+  text-align: center;
+}
+
+.ranking-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ranking-controls {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* ─── Submitted Banner ──────────────────────────────────────────────── */
+
+.submitted-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 8px;
+  background: rgba(80, 168, 120, 0.12);
+  border: 1px solid rgba(80, 168, 120, 0.3);
+}
+
+.submitted-icon {
+  font-size: 1.4rem;
+  color: #50a878;
+}
+
+.submitted-text {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #50a878;
+}
+
+/* ─── Results ───────────────────────────────────────────────────────── */
+
+.results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.results-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  background: #1a1e28;
+  border: 1px solid #252a36;
+  border-radius: 10px;
+  transition: border-color 0.12s;
+}
+
+.results-item--first {
+  background: rgba(196, 160, 80, 0.1);
+  border-color: #c4a050;
+  box-shadow: 0 0 16px rgba(196, 160, 80, 0.15);
+}
+
+.results-item--draw {
+  border-color: #5082c4;
+}
+
+.results-item--first.results-item--draw {
+  border-color: #c4a050;
+}
+
+.results-item-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.results-rank {
+  font-size: 1.1rem;
+  font-weight: 700;
+  min-width: 32px;
+  text-align: center;
+  color: #7a8394;
+}
+
+.results-item--first .results-rank {
+  font-size: 1.4rem;
+}
+
+.results-game-name {
+  flex: 1;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #9aa3b4;
+}
+
+.results-item--first .results-game-name {
+  font-size: 1.15rem;
+  color: #c4a050;
+}
+
+.draw-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #5082c4;
+  border: 1px solid #5082c4;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.results-score {
+  font-size: 0.85rem;
+  color: #4a5264;
+  font-variant-numeric: tabular-nums;
+}
+
+.results-item--first .results-score {
+  color: #c4a050;
+  font-weight: 600;
+}
+
+.results-bar-track {
+  height: 4px;
+  background: #252a36;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.results-bar-fill {
+  height: 100%;
+  background: #5082c4;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.results-bar-fill--first {
+  background: #c4a050;
+}
+
+/* ─── Connecting Screen ─────────────────────────────────────────────── */
+
+.connecting-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 20px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.connecting-logo {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: #9aa3b4;
+  letter-spacing: 0.06em;
+}
+
+.connecting-status {
+  font-size: 1rem;
+  color: #4a5264;
+}
+
+.connecting-dots {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.dot-pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3d6496;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.dot-pulse:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dot-pulse:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes pulse {
+  0%, 80%, 100% {
+    transform: scale(0.7);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* ─── Hint / Empty Text ─────────────────────────────────────────────── */
+
+.hint-text {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #4a5264;
+  line-height: 1.5;
+}
+
+.empty-hint {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #3a3f4e;
+  font-style: italic;
+  padding: 8px 0;
+  text-align: center;
+}
+
+.center-text {
+  text-align: center;
+}
+
+/* ─── Scrollbar ─────────────────────────────────────────────────────── */
+
+.content-area::-webkit-scrollbar {
+  width: 6px;
+}
+
+.content-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content-area::-webkit-scrollbar-thumb {
+  background: #252a36;
+  border-radius: 3px;
+}
+
+.content-area::-webkit-scrollbar-thumb:hover {
+  background: #3a3f4e;
+}
+
+/* ─── Name Chip (top bar) ───────────────────────────────────────────── */
+
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.name-chip {
+  background: transparent;
+  border: 1px solid #252a36;
+  border-radius: 999px;
+  color: #9aa3b4;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 4px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: inherit;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.name-chip:hover {
+  border-color: #5082c4;
+  color: #c8d8f0;
+}
+
+.name-edit-input {
+  background: #1a1e28;
+  border: 1px solid #5082c4;
+  border-radius: 999px;
+  color: #9aa3b4;
+  font-size: 0.85rem;
+  padding: 4px 12px;
+  outline: none;
+  width: 140px;
+  font-family: inherit;
+  min-height: 32px;
+}
+
+/* ─── Veto Stepper ──────────────────────────────────────────────────── */
+.veto-stepper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.veto-count {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #9aa3b4;
+  min-width: 32px;
+  text-align: center;
+}
+.veto-label {
+  font-size: 0.9rem;
+  color: #7a8394;
+  flex: 1;
+}
+
+/* ─── Drag Handle ───────────────────────────────────────────────────── */
+
+.drag-handle {
+  font-size: 1.2rem;
+  color: #3a3f4e;
+  cursor: grab;
+  padding: 0 4px;
+  user-select: none;
+  flex-shrink: 0;
+  touch-action: none;
+  line-height: 1;
+}
+
+.drag-handle:hover {
+  color: #7a8394;
+}
+
+.drag-handle--disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+
+.ranking-item--dragging {
+  opacity: 0.5;
+  border-style: dashed;
+  border-color: #5082c4;
+}
+
+/* ─── Lobby Browser ─────────────────────────────────────────────────── */
+
+.lobby-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lobby-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #1a1e28;
+  border: 1px solid #252a36;
+  border-radius: 8px;
+}
+
+.lobby-item-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lobby-item-name {
+  font-weight: 600;
+  color: #c8cdd8;
+  font-size: 0.95rem;
+}
+
+.lobby-lock-icon {
+  font-size: 0.8rem;
+}
+
+.lobby-locked-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #c45050;
+  border: 1px solid #c45050;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.lobby-item-meta {
+  font-size: 0.8rem;
+  color: #4a5264;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phase-badge--small {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+}
+
+.lobby-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lobby-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #c8cdd8;
+  font-size: 0.95rem;
+  padding: 8px 12px;
+  background: #1a1e28;
+  border: 1px solid #252a36;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.lobby-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #5082c4;
+  cursor: pointer;
+}
+
+.lobby-create-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ─── Toast ─────────────────────────────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #fff;
+  z-index: 1000;
+  cursor: pointer;
+  animation: toast-in 0.2s ease;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.toast--info {
+  background: #5082c4;
+}
+
+.toast--error {
+  background: #c45050;
+}
+
+.toast--warning {
+  background: #c4a050;
+}
+
+/* ─── Top Bar Lobby ─────────────────────────────────────────────────── */
+
+.top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lobby-name-badge {
+  font-size: 0.8rem;
+  color: #7a8394;
+  font-weight: 400;
+}
+
+/* ─── Lobby Settings ────────────────────────────────────────────────── */
+
+.lobby-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lobby-password-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.lobby-password-input {
+  flex: 1;
+  background: #1a1e28;
+  border: 1px solid #252a36;
+  border-radius: 8px;
+  color: #9aa3b4;
+  font-size: 0.85rem;
+  padding: 8px 12px;
+  outline: none;
+  font-family: inherit;
+}
+
+.lobby-password-input:focus {
+  border-color: #5082c4;
+}
+
+/* ─── GitHub Link ───────────────────────────────────────────────────── */
+
+.github-link {
+  color: #4a5264;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.github-link:hover {
+  color: #9aa3b4;
+}
+
+.github-link--hero {
+  margin-top: 8px;
+  color: #3a4254;
+}
+
+.github-link--hero:hover {
+  color: #7a8394;
+}

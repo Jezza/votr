@@ -1,0 +1,21 @@
+{
+  "name": "app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run ./src/index.html",
+    "start": "NODE_ENV=production bun run src/index.html",
+    "b": "rm -rf ./dist && bun build ./src/index.html --outdir=dist"
+  },
+  "dependencies": {
+    "react": "^19",
+    "react-dom": "^19",
+    "zustand": "^5"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/bun": "latest"
+  }
+}
