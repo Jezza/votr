@@ -1,12 +1,13 @@
+use dashmap::DashMap;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 use tokio::time::Instant;
 
 use crate::session::Session;
 
-pub const MAX_LOBBIES: usize = 100;
+pub const MAX_LOBBIES: usize = 128;
 pub const LOBBY_EMPTY_TIMEOUT: u64 = 60;
 pub const LOBBY_CLEANUP_INTERVAL: u64 = 10;
 
@@ -37,7 +38,7 @@ impl Lobby {
     }
 
     pub fn has_connected_players(&self) -> bool {
-        self.session.players.iter().any(|p| p.connected)
+        self.session.players.iter().any(|p| p.is_connected())
     }
 }
 
@@ -50,6 +51,27 @@ pub struct LobbyInfo {
     pub has_password: bool,
     pub locked: bool,
     pub phase: String,
+}
+
+type LobbyRef<'a> = dashmap::mapref::one::Ref<'a, String, Lobby>;
+type LobbyRefMut<'a> = dashmap::mapref::one::RefMut<'a, String, Lobby>;
+
+#[derive(Clone, Default)]
+pub struct LoggyManager(Arc<Inner>);
+
+#[derive(Default)]
+struct Inner {
+    lobbies: DashMap<String, Lobby>,
+}
+
+impl LoggyManager {
+    pub fn find_lobby(&self, id: &str) -> Option<LobbyRef<'_>> {
+        self.0.lobbies.get(id)
+    }
+
+    pub fn find_lobby_mut(&self, id: &str) -> Option<LobbyRefMut<'_>> {
+        self.0.lobbies.get_mut(id)
+    }
 }
 
 pub struct LobbyManager {
@@ -90,15 +112,31 @@ impl LobbyManager {
 fn generate_lobby_name() -> String {
     use rand::RngExt;
     const ADJECTIVES: &[&str] = &[
-        "Fuzzy", "Spicy", "Grumpy", "Wobbly", "Sneaky", "Bouncy", "Fluffy",
-        "Zesty", "Clumsy", "Sassy", "Wiggly", "Cheeky", "Dizzy", "Jolly",
-        "Wacky", "Peppy", "Goofy", "Nifty", "Perky", "Zippy",
+        "Fuzzy", "Spicy", "Grumpy", "Wobbly", "Sneaky", "Bouncy", "Fluffy", "Zesty", "Clumsy",
+        "Sassy", "Wiggly", "Cheeky", "Dizzy", "Jolly", "Wacky", "Peppy", "Goofy", "Nifty", "Perky",
+        "Zippy",
     ];
     const NOUNS: &[&str] = &[
-        "Badger", "Narwhal", "Capybara", "Penguin", "Platypus", "Axolotl",
-        "Quokka", "Wombat", "Meerkat", "Pangolin", "Tapir", "Manatee",
-        "Binturong", "Fossa", "Numbat", "Echidna", "Kinkajou", "Potoo",
-        "Blobfish", "Tardigrade",
+        "Badger",
+        "Narwhal",
+        "Capybara",
+        "Penguin",
+        "Platypus",
+        "Axolotl",
+        "Quokka",
+        "Wombat",
+        "Meerkat",
+        "Pangolin",
+        "Tapir",
+        "Manatee",
+        "Binturong",
+        "Fossa",
+        "Numbat",
+        "Echidna",
+        "Kinkajou",
+        "Potoo",
+        "Blobfish",
+        "Tardigrade",
     ];
     let mut rng = rand::rng();
     let adj = ADJECTIVES[rng.random_range(0..ADJECTIVES.len())];

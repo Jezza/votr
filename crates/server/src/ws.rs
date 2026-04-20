@@ -1,7 +1,7 @@
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::Response,
 };
@@ -12,14 +12,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
-use tracing::info;
+use tracing::{debug, info, warn};
 
-use crate::lobby::{Lobby, LobbyManager};
-use crate::session::{Game, Phase, Player, VoteResult, MAX_PLAYERS};
+use crate::lobby::{Lobby, LoggyManager};
+use crate::session::{Game, JoinOutcome, MAX_PLAYERS, Phase, Player, VoteResult};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub lobbies: Arc<Mutex<LobbyManager>>,
+    // pub lobbies: Arc<Mutex<LobbyManager>>,
+    pub loggies: LoggyManager,
 }
 
 #[derive(Serialize)]
@@ -80,92 +81,36 @@ async fn handle_socket(
     lobby_id: String,
     password: Option<String>,
 ) {
-    // Look up the lobby Arc from the manager (brief lock)
-    let lobby_arc = {
-        let manager = state.lobbies.lock().await;
-        manager.get_lobby(&lobby_id)
+    let stored_id = stored_id.expect("id should always be here");
+
+    let name = if name.trim().is_empty() {
+        // let player_number = self.players.len() + 1;
+        format!("Player '{}'", stored_id)
+    } else {
+        name.to_string()
     };
 
-    let lobby_arc = match lobby_arc {
-        Some(arc) => arc,
-        None => {
+    // Lock lobby for validation and player setup
+    let rx = {
+        let Some(lobby) = state.loggies.find_lobby_mut(&lobby_id) else {
+            warn!(lobby_id, "lobby not found");
             let (mut sender, _) = socket.split();
             let msg = r#"{"type":"toast","message":"Lobby not found"}"#;
             let _ = sender.send(Message::Text(msg.into())).await;
             return;
-        }
-    };
+        };
 
-    // Lock lobby for validation and player setup
-    let player_id = {
-        let mut lobby = lobby_arc.lock().await;
-
-        // Check if kicked
-        if let Some(ref id) = stored_id {
-            if lobby.session.is_kicked(id) {
-                drop(lobby);
-                let (mut sender, _) = socket.split();
-                let msg = r#"{"type":"kicked"}"#;
-                let _ = sender.send(Message::Text(msg.into())).await;
-                return;
-            }
-        }
-
-        // Determine if this is a reconnecting player
-        let is_reconnecting = stored_id.as_ref().map_or(false, |id| {
-            lobby.session.players.iter().any(|p| p.id == *id)
-        });
-
-        // Check locked — but allow reconnecting players
-        if lobby.locked && !is_reconnecting {
-            drop(lobby);
-            let (mut sender, _) = socket.split();
-            let msg = r#"{"type":"toast","message":"Lobby is locked"}"#;
-            let _ = sender.send(Message::Text(msg.into())).await;
-            return;
-        }
-
-        // Check password — skip for reconnecting players
-        if !is_reconnecting {
-            if let Some(ref lobby_pw) = lobby.password {
-                let provided = password.as_deref().unwrap_or("");
-                if provided != lobby_pw {
-                    drop(lobby);
-                    let (mut sender, _) = socket.split();
-                    let msg = r#"{"type":"toast","message":"Incorrect password"}"#;
-                    let _ = sender.send(Message::Text(msg.into())).await;
-                    return;
-                }
-            }
-        }
-
-        // Rejoin or add player
-        let pid = if let Some(ref id) = stored_id {
-            if lobby.session.rejoin(id) {
-                // Update name on rejoin in case it changed
-                if !name.trim().is_empty() {
-                    if let Some(player) = lobby.session.players.iter_mut().find(|p| p.id == id.as_str()) {
-                        player.name = name.clone();
-                    }
-                }
-                id.clone()
-            } else {
-                let new_id = uuid::Uuid::new_v4().to_string();
-                if lobby.session.add_player(&new_id, &name).is_err() {
-                    drop(lobby);
-                    let (mut sender, _) = socket.split();
-                    let msg = serde_json::json!({
-                        "type": "toast",
-                        "message": format!("Lobby is full (max {} players)", MAX_PLAYERS)
-                    });
-                    let _ = sender.send(Message::Text(msg.to_string().into())).await;
-                    return;
-                }
-                new_id
-            }
+        // Locked lobbies only allow reconnecting players.
+        let outcome = if lobby.locked {
+            lobby.session.rejoin(&stored_id, &name)
         } else {
-            let new_id = uuid::Uuid::new_v4().to_string();
-            if lobby.session.add_player(&new_id, &name).is_err() {
+            Some(lobby.session.add_player(&stored_id, &name))
+        };
+
+        let outcome = match outcome {
+            Some(outcome @ (JoinOutcome::New | JoinOutcome::Rejoined)) => outcome,
+            Some(JoinOutcome::LobbyFull) => {
+                warn!(lobby_id, "player rejected: lobby full");
                 drop(lobby);
                 let (mut sender, _) = socket.split();
                 let msg = serde_json::json!({
@@ -175,18 +120,48 @@ async fn handle_socket(
                 let _ = sender.send(Message::Text(msg.to_string().into())).await;
                 return;
             }
-            new_id
+            Some(JoinOutcome::Kicked) => {
+                warn!(
+                    player_id = stored_id,
+                    lobby_id, "kicked player tried to rejoin"
+                );
+                drop(lobby);
+                let (mut sender, _) = socket.split();
+                let msg = r#"{"type":"kicked"}"#;
+                let _ = sender.send(Message::Text(msg.into())).await;
+                return;
+            }
+            None => {
+                warn!(lobby_id, "player rejected: lobby is locked");
+                drop(lobby);
+                let (mut sender, _) = socket.split();
+                let msg = r#"{"type":"toast","message":"Lobby is locked"}"#;
+                let _ = sender.send(Message::Text(msg.into())).await;
+                return;
+            }
         };
 
-        // Clear last_empty since someone is now connected
-        lobby.last_empty = None;
+        info!(
+            player_id = stored_id,
+            lobby_id, "player connected ({:?})", outcome
+        );
 
-        pid
-    };
+        // Only verify password on newcomers.
+        if matches!(outcome, JoinOutcome::New) {
+            if let Some(ref lobby_pw) = lobby.password {
+                let provided = password.as_deref().unwrap_or("");
+                if provided != lobby_pw {
+                    warn!(lobby_id, "player rejected: incorrect password");
+                    drop(lobby);
+                    let (mut sender, _) = socket.split();
+                    let msg = r#"{"type":"toast","message":"Incorrect password"}"#;
+                    let _ = sender.send(Message::Text(msg.into())).await;
+                    return;
+                }
+            }
+        }
 
-    // Subscribe BEFORE broadcasting so this client receives the state
-    let rx = {
-        let lobby = lobby_arc.lock().await;
+        // Subscribe BEFORE broadcasting so this client receives the state
         let rx = lobby.tx.subscribe();
         let state_json = serialize_state(&lobby);
         let _ = lobby.tx.send(state_json);
@@ -198,7 +173,7 @@ async fn handle_socket(
     // Send welcome message to this client only
     let welcome = serde_json::json!({
         "type": "welcome",
-        "player_id": player_id,
+        "player_id": stored_id,
         "lobby_id": lobby_id,
     });
     if sender
@@ -216,7 +191,7 @@ async fn handle_socket(
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        let response = handle_message(&text, &player_id, &lobby_arc, &state).await;
+                        let response = handle_message(&text, &stored_id, &lobby_id, &state).await;
                         if let Some(err_msg) = response {
                             let _ = sender.send(Message::Text(err_msg.into())).await;
                         }
@@ -320,6 +295,9 @@ async fn handle_message(
 
     let mut lobby_guard = lobby.lock().await;
     let is_host = lobby_guard.session.get_host_id() == Some(player_id);
+    let lobby_id = lobby_guard.id.clone();
+
+    debug!(player_id, %lobby_id, %msg_type, "received message");
 
     match msg_type.as_str() {
         "set_name" => {
@@ -328,7 +306,12 @@ async fn handle_message(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            if let Some(player) = lobby_guard.session.players.iter_mut().find(|p| p.id == player_id) {
+            if let Some(player) = lobby_guard
+                .session
+                .players
+                .iter_mut()
+                .find(|p| p.id == player_id)
+            {
                 if !name.trim().is_empty() {
                     player.name = name;
                 }
@@ -396,6 +379,7 @@ async fn handle_message(
                 );
             }
             lobby_guard.session.advance_phase();
+            info!(lobby_id, phase = ?lobby_guard.session.phase, "phase advanced");
         }
         "reset_session" => {
             if !is_host {
@@ -405,6 +389,7 @@ async fn handle_message(
                 );
             }
             lobby_guard.session.reset();
+            info!(lobby_id, "session reset");
         }
         "kick_player" => {
             if !is_host {
@@ -423,6 +408,7 @@ async fn handle_message(
                 );
             }
             lobby_guard.session.kick_player(&target_id);
+            info!(lobby_id, target_id, "player kicked");
         }
         "set_max_vetoes" => {
             if !is_host {
@@ -431,10 +417,7 @@ async fn handle_message(
                         .to_string(),
                 );
             }
-            let count = value
-                .get("count")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(1) as u32;
+            let count = value.get("count").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
             lobby_guard.session.set_max_vetoes(count);
         }
         "set_lobby_public" => {
@@ -485,16 +468,16 @@ async fn handle_message(
         "close_lobby" => {
             if !is_host {
                 return Some(
-                    r#"{"type":"error","message":"only the host can close the lobby"}"#
-                        .to_string(),
+                    r#"{"type":"error","message":"only the host can close the lobby"}"#.to_string(),
                 );
             }
+            info!(lobby_id, "lobby closed by host");
             let closed_msg = r#"{"type":"lobby_closed"}"#.to_string();
             let _ = lobby_guard.tx.send(closed_msg);
-            let lobby_id = lobby_guard.id.clone();
+            let lobby_id_owned = lobby_guard.id.clone();
             drop(lobby_guard);
             let mut manager = state.lobbies.lock().await;
-            manager.remove_lobby(&lobby_id);
+            manager.remove_lobby(&lobby_id_owned);
             return None;
         }
         _ => {

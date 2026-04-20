@@ -15,10 +15,32 @@ pub enum Phase {
 pub struct Player {
     pub id: String,
     pub name: String,
-    pub connected: bool,
+    pub connection_status: ConnectionStatus,
     pub ready: bool,
+    // pub connected: bool,
+    // pub disconnect_timeout: Option<u32>,
+}
+
+impl Player {
+    pub fn is_connected(&self) -> bool {
+        matches!(self.connection_status, ConnectionStatus::Connected)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum ConnectionStatus {
+    Connected,
+    Kicked,
     /// Seconds remaining before this player is removed (None if connected)
-    pub disconnect_timeout: Option<u32>,
+    Disconnected(u32),
+}
+
+#[derive(Debug)]
+pub enum JoinOutcome {
+    New,
+    Rejoined,
+    Kicked,
+    LobbyFull,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,61 +92,74 @@ impl Session {
         }
     }
 
-    /// Try to reconnect a previously-seen player. Returns true if found.
-    pub fn rejoin(&mut self, player_id: &str) -> bool {
-        if let Some(player) = self.players.iter_mut().find(|p| p.id == player_id) {
-            player.connected = true;
-            player.disconnect_timeout = None;
-            // If there's no host, assign this player as host
-            if self.host_id.is_none() {
-                self.host_id = Some(player_id.to_string());
-            }
-            true
-        } else {
-            false
-        }
-    }
-
     pub fn set_max_vetoes(&mut self, count: u32) {
         self.max_vetoes = count.max(1).min(20);
     }
 
-    pub fn add_player(&mut self, id: &str, name: &str) -> Result<(), &'static str> {
-        if self.players.len() >= MAX_PLAYERS {
-            return Err("lobby is full");
-        }
-        let player_number = self.players.len() + 1;
-        let resolved_name = if name.trim().is_empty() {
-            format!("Player {}", player_number)
-        } else {
-            name.to_string()
+    /// Try to reconnect a previously-seen player.
+    pub fn rejoin(&mut self, id: &str, name: &str) -> Option<JoinOutcome> {
+        let Some(player) = self.players.iter_mut().find(|p| p.id == id) else {
+            // No existing player found, so must be a new one.
+            return None;
         };
 
-        // If a player with this id already exists (reconnect), mark them connected
-        if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
-            player.connected = true;
-            player.name = resolved_name;
-        } else {
-            self.players.push(Player {
-                id: id.to_string(),
-                name: resolved_name,
-                connected: true,
-                ready: false,
-                disconnect_timeout: None,
-            });
-        }
+        player.name = String::from(name);
+
+        let outcome = match player.connection_status {
+            ConnectionStatus::Connected => {
+                // Someone is already here with that?
+                // It's possible that they just opened it up in a new tab...
+                JoinOutcome::Rejoined
+            }
+            ConnectionStatus::Kicked => {
+                // Return early here, as we're just getting rid of them..
+                return Some(JoinOutcome::Kicked);
+            }
+            ConnectionStatus::Disconnected(_) => {
+                // Reconnect the player to existing slot.
+                player.connection_status = ConnectionStatus::Connected;
+                JoinOutcome::Rejoined
+            }
+        };
 
         // If there's no host, assign this player as host
         if self.host_id.is_none() {
             self.host_id = Some(id.to_string());
         }
-        Ok(())
+
+        Some(outcome)
+    }
+
+    pub fn add_player(&mut self, id: &str, name: &str) -> JoinOutcome {
+        if let Some(outcome) = self.rejoin(id, name) {
+            return outcome;
+        }
+
+        let outcome = if self.players.len() >= MAX_PLAYERS {
+            // Return early here, as it's an error state.
+            return JoinOutcome::LobbyFull;
+        } else {
+            self.players.push(Player {
+                id: String::from(id),
+                name: String::from(name),
+                connection_status: ConnectionStatus::Connected,
+                ready: false,
+            });
+
+            JoinOutcome::New
+        };
+
+        // If there's no host, assign this player as host
+        if self.host_id.is_none() {
+            self.host_id = Some(id.to_string());
+        }
+
+        outcome
     }
 
     pub fn remove_player(&mut self, id: &str) {
         if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
-            player.connected = false;
-            player.disconnect_timeout = Some(20);
+            player.connection_status = ConnectionStatus::Disconnected(20);
         }
     }
 
@@ -190,10 +225,8 @@ impl Session {
         let n = eligible_games.len();
         let eligible_ids: Vec<String> = eligible_games.iter().map(|g| g.id.clone()).collect();
 
-        let mut scores: HashMap<String, u32> = eligible_ids
-            .iter()
-            .map(|id| (id.clone(), 0u32))
-            .collect();
+        let mut scores: HashMap<String, u32> =
+            eligible_ids.iter().map(|id| (id.clone(), 0u32)).collect();
 
         for ranking in self.votes.values() {
             // Only count positions for eligible games
@@ -312,7 +345,7 @@ impl Session {
         let connected_players: Vec<&str> = self
             .players
             .iter()
-            .filter(|p| p.connected)
+            .filter(|p| p.is_connected())
             .map(|p| p.id.as_str())
             .collect();
         connected_players
