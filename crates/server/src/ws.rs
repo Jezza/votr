@@ -1,3 +1,5 @@
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::{
     extract::{
         Query, State,
@@ -14,13 +16,54 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
-use crate::lobby::{Lobby, LoggyManager};
-use crate::session::{Game, JoinOutcome, MAX_PLAYERS, Phase, Player, VoteResult};
+use crate::lobby::{JoinOutcome, Lobby, MAX_PLAYERS, Opt, Phase, Player, VoteResult};
+use crate::types;
+
+pub const MAX_LOBBIES: usize = 128;
+pub const LOBBY_EMPTY_TIMEOUT: u64 = 60;
+pub const LOBBY_CLEANUP_INTERVAL: u64 = 10;
 
 #[derive(Clone)]
 pub struct AppState {
+    pub lobbies: Arc<Mutex<HashMap<types::LobbyId, Lobby>>>,
     // pub lobbies: Arc<Mutex<LobbyManager>>,
-    pub loggies: LoggyManager,
+    // pub loggies: LoggyManager,
+    // pub loppies: LoggyManager,
+}
+
+impl AppState {
+    pub fn find_lobby(&self, lobby_id: &types::LobbyId) -> Option<Lobby> {
+        // let types::JoinInfo {
+        //     player_id,
+        //     name,
+        //     lobby_id,
+        //     password,
+        // } = info;
+
+        // JoinOutcome::Kicked
+        None
+    }
+
+    pub fn create_lobby(
+        &mut self,
+        public: bool,
+        password: Option<String>,
+    ) -> Result<(String, String), &'static str> {
+        if self.lobbies.len() >= MAX_LOBBIES {
+            return Err("too many lobbies");
+        }
+        let lobby = Lobby::new(public, password);
+        self.lobbies.insert(id.clone(), Arc::new(Mutex::new(lobby)));
+        Ok((id, name))
+    }
+
+    pub fn remove_lobby(&mut self, id: &str) {
+        self.lobbies.remove(id);
+    }
+
+    pub fn get_lobby(&self, id: &str) -> Option<Arc<Mutex<Lobby>>> {
+        self.lobbies.get(id).cloned()
+    }
 }
 
 #[derive(Serialize)]
@@ -29,7 +72,7 @@ struct StateMessage<'a> {
     msg_type: &'static str,
     phase: &'a Phase,
     players: &'a Vec<Player>,
-    games: &'a Vec<Game>,
+    games: &'a Vec<Opt>,
     votes_submitted: &'a Vec<String>,
     results: &'a Option<Vec<VoteResult>>,
     host_id: Option<&'a str>,
@@ -44,13 +87,13 @@ struct StateMessage<'a> {
 fn serialize_state(lobby: &Lobby) -> String {
     let msg = StateMessage {
         msg_type: "state",
-        phase: &lobby.session.phase,
-        players: &lobby.session.players,
-        games: &lobby.session.games,
-        votes_submitted: &lobby.session.votes_submitted,
-        results: &lobby.session.results,
-        host_id: lobby.session.host_id.as_deref(),
-        max_vetoes: lobby.session.max_vetoes,
+        phase: &lobby.phase,
+        players: &lobby.players,
+        games: &lobby.options,
+        votes_submitted: &lobby.votes_submitted,
+        results: &lobby.results,
+        host_id: lobby.host_id.as_deref(),
+        max_vetoes: lobby.max_vetoes,
         lobby_id: &lobby.id,
         lobby_name: &lobby.name,
         lobby_public: lobby.public,
@@ -61,128 +104,208 @@ fn serialize_state(lobby: &Lobby) -> String {
         .unwrap_or_else(|_| r#"{"type":"error","message":"serialization error"}"#.to_string())
 }
 
-pub async fn ws_handler(
+pub async fn handler(
     ws: WebSocketUpgrade,
-    Query(params): Query<HashMap<String, String>>,
+    Query(mut params): Query<HashMap<String, String>>,
     State(state): State<AppState>,
 ) -> Response {
-    let stored_id = params.get("player_id").cloned();
-    let name = params.get("name").cloned().unwrap_or_default();
-    let lobby_id = params.get("lobby_id").cloned().unwrap_or_default();
-    let password = params.get("password").cloned();
-    ws.on_upgrade(|socket| handle_socket(socket, state, stored_id, name, lobby_id, password))
+    let Some(player_id) = params.remove("player_id") else {
+        warn!("someone sent a request without a `player_id`");
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let Some(name) = params.remove("name") else {
+        warn!("someone sent a request without a `name`");
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    if name.trim().is_empty() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
+    let Some(lobby_id) = params.remove("lobby_id") else {
+        warn!("someone sent a request without a `lobby_id`");
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let password = params.remove("password");
+
+    let info = types::JoinInfo {
+        player_id: types::PlayerId(player_id),
+        name,
+        lobby_id: types::LobbyId(lobby_id),
+        password,
+    };
+
+    let Some(lobby) = state.find_lobby(&info.lobby_id) else {
+        warn!("someone sent a request without a `lobby_id`");
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+
+    ws.on_upgrade(|socket| handle_socket(socket, state, info, lobby))
 }
 
-async fn handle_socket(
-    socket: WebSocket,
-    state: AppState,
-    stored_id: Option<String>,
-    name: String,
-    lobby_id: String,
-    password: Option<String>,
-) {
-    let stored_id = stored_id.expect("id should always be here");
+macro_rules! send {
+    ($sender:expr, $msg:expr) => {{
+        let sender = &{ $sender };
+        let msg = types::Outgoing::from($msg);
 
-    let name = if name.trim().is_empty() {
-        // let player_number = self.players.len() + 1;
-        format!("Player '{}'", stored_id)
-    } else {
-        name.to_string()
-    };
-
-    // Lock lobby for validation and player setup
-    let rx = {
-        let Some(lobby) = state.loggies.find_lobby_mut(&lobby_id) else {
-            warn!(lobby_id, "lobby not found");
-            let (mut sender, _) = socket.split();
-            let msg = r#"{"type":"toast","message":"Lobby not found"}"#;
-            let _ = sender.send(Message::Text(msg.into())).await;
-            return;
-        };
-
-        // Locked lobbies only allow reconnecting players.
-        let outcome = if lobby.locked {
-            lobby.session.rejoin(&stored_id, &name)
-        } else {
-            Some(lobby.session.add_player(&stored_id, &name))
-        };
-
-        let outcome = match outcome {
-            Some(outcome @ (JoinOutcome::New | JoinOutcome::Rejoined)) => outcome,
-            Some(JoinOutcome::LobbyFull) => {
-                warn!(lobby_id, "player rejected: lobby full");
-                drop(lobby);
-                let (mut sender, _) = socket.split();
-                let msg = serde_json::json!({
-                    "type": "toast",
-                    "message": format!("Lobby is full (max {} players)", MAX_PLAYERS)
-                });
-                let _ = sender.send(Message::Text(msg.to_string().into())).await;
-                return;
-            }
-            Some(JoinOutcome::Kicked) => {
-                warn!(
-                    player_id = stored_id,
-                    lobby_id, "kicked player tried to rejoin"
-                );
-                drop(lobby);
-                let (mut sender, _) = socket.split();
-                let msg = r#"{"type":"kicked"}"#;
-                let _ = sender.send(Message::Text(msg.into())).await;
-                return;
-            }
-            None => {
-                warn!(lobby_id, "player rejected: lobby is locked");
-                drop(lobby);
-                let (mut sender, _) = socket.split();
-                let msg = r#"{"type":"toast","message":"Lobby is locked"}"#;
-                let _ = sender.send(Message::Text(msg.into())).await;
+        let value = match serde_json::to_string(&msg) {
+            Ok(value) => value,
+            Err(err) => {
+                ::tracing::error!("unable to serialise message: {}", err);
                 return;
             }
         };
 
-        info!(
-            player_id = stored_id,
-            lobby_id, "player connected ({:?})", outcome
-        );
+        let _ = sender.send(Message::Text(value.into())).await;
+    }};
+}
 
-        // Only verify password on newcomers.
-        if matches!(outcome, JoinOutcome::New) {
-            if let Some(ref lobby_pw) = lobby.password {
-                let provided = password.as_deref().unwrap_or("");
-                if provided != lobby_pw {
-                    warn!(lobby_id, "player rejected: incorrect password");
-                    drop(lobby);
-                    let (mut sender, _) = socket.split();
-                    let msg = r#"{"type":"toast","message":"Incorrect password"}"#;
-                    let _ = sender.send(Message::Text(msg.into())).await;
-                    return;
-                }
-            }
-        }
-
-        // Subscribe BEFORE broadcasting so this client receives the state
-        let rx = lobby.tx.subscribe();
-        let state_json = serialize_state(&lobby);
-        let _ = lobby.tx.send(state_json);
-        rx
-    };
-
+async fn handle_socket(socket: WebSocket, mut state: AppState, info: types::JoinInfo, lobby: Lobby) {
     let (mut sender, mut receiver) = socket.split();
 
+    // let t = send!(sender, "");
+
+    // let Some(lobby) = state.find_lobby(&info.lobby_id) else {
+    //     info!(
+    //         player_id = info.player_id,
+    //         lobby_id = info.lobby_id,
+    //         "unable to find lobby"
+    //     );
+    //     send!(sender, types::Toast::error("Lobby not found"));
+    //     return;
+    // };
+
+    let outcome = lobby.join(&info);
+
+    let rx = match outcome {
+        // JoinOutcome::New => false,
+        // JoinOutcome::Rejoined => true,
+        JoinOutcome::Joined(rx, _rejoined) => rx,
+        JoinOutcome::Locked => {
+            info!(
+                player_id = info.player_id,
+                lobby_id = info.lobby_id,
+                "lobby is locked"
+            );
+            send!(sender, types::Toast::error("Lobby is locked"));
+            return;
+        }
+        JoinOutcome::Kicked => {
+            info!(
+                player_id = info.player_id,
+                lobby_id = info.lobby_id,
+                "played attempt to rejoin after being kicked"
+            );
+            send!(sender, types::Kicked {});
+            return;
+        }
+        JoinOutcome::LobbyFull => {
+            info!(
+                player_id = info.player_id,
+                lobby_id = info.lobby_id,
+                "lobby is full"
+            );
+            send!(
+                sender,
+                types::Toast::warn(format!("Lobby is full (max {} players)", MAX_PLAYERS))
+            );
+            return;
+        }
+    };
+
+    // player_id: String,
+    // name: String,
+    // lobby_id: String,
+    // password: Option<String>,
+
+    // state.loppies.join();
+
+    // Lock lobby for validation and player setup
+    // let rx = {
+    //     let Some(lobby) = state.loggies.find_lobby_mut(&lobby_id) else {
+    //         warn!(lobby_id, "lobby not found");
+    //         let msg = r#"{"type":"toast","message":"Lobby not found"}"#;
+    //         let _ = sender.send(Message::Text(msg.into())).await;
+    //         return;
+    //     };
+    //
+    //     // Locked lobbies only allow reconnecting players.
+    //     let outcome = if lobby.locked {
+    //         lobby.session.rejoin(&player_id, &name)
+    //     } else {
+    //         Some(lobby.session.add_player(&player_id, &name))
+    //     };
+    //
+    //     let outcome = match outcome {
+    //         Some(outcome @ (JoinOutcome::New | JoinOutcome::Rejoined)) => outcome,
+    //         Some(JoinOutcome::LobbyFull) => {
+    //             warn!(lobby_id, "player rejected: lobby full");
+    //             drop(lobby);
+    //             let msg = serde_json::json!({
+    //                 "type": "toast",
+    //                 "message": format!("Lobby is full (max {} players)", MAX_PLAYERS)
+    //             });
+    //             let _ = sender.send(Message::Text(msg.to_string().into())).await;
+    //             return;
+    //         }
+    //         Some(JoinOutcome::Kicked) => {
+    //             warn!(
+    //                 player_id = player_id,
+    //                 lobby_id, "kicked player tried to rejoin"
+    //             );
+    //             drop(lobby);
+    //             let msg = r#"{"type":"kicked"}"#;
+    //             let _ = sender.send(Message::Text(msg.into())).await;
+    //             return;
+    //         }
+    //         None => {
+    //             warn!(lobby_id, "player rejected: lobby is locked");
+    //             drop(lobby);
+    //             let msg = r#"{"type":"toast","message":"Lobby is locked"}"#;
+    //             let _ = sender.send(Message::Text(msg.into())).await;
+    //             return;
+    //         }
+    //     };
+    //
+    //     info!(
+    //         player_id = player_id,
+    //         lobby_id, "player connected ({:?})", outcome
+    //     );
+    //
+    //     // Only verify password on newcomers.
+    //     if matches!(outcome, JoinOutcome::New) {
+    //         if let Some(ref lobby_pw) = lobby.password {
+    //             let provided = password.as_deref().unwrap_or("");
+    //             if provided != lobby_pw {
+    //                 warn!(lobby_id, "player rejected: incorrect password");
+    //                 drop(lobby);
+    //                 let (mut sender, _) = socket.split();
+    //                 let msg = r#"{"type":"toast","message":"Incorrect password"}"#;
+    //                 let _ = sender.send(Message::Text(msg.into())).await;
+    //                 return;
+    //             }
+    //         }
+    //     }
+    //
+    //     // Subscribe BEFORE broadcasting so this client receives the state
+    //     let rx = lobby.tx.subscribe();
+    //     let state_json = serialize_state(&lobby);
+    //     let _ = lobby.tx.send(state_json);
+    //     rx
+    // };
+
     // Send welcome message to this client only
-    let welcome = serde_json::json!({
-        "type": "welcome",
-        "player_id": stored_id,
-        "lobby_id": lobby_id,
-    });
-    if sender
-        .send(Message::Text(welcome.to_string().into()))
-        .await
-        .is_err()
-    {
-        return;
-    }
+    // let welcome = serde_json::json!({
+    //     "type": "welcome",
+    //     "player_id": player_id,
+    //     "lobby_id": lobby_id,
+    // });
+    // if sender
+    //     .send(Message::Text(welcome.to_string().into()))
+    //     .await
+    //     .is_err()
+    // {
+    //     return;
+    // }
 
     let mut rx = rx;
 
@@ -191,7 +314,7 @@ async fn handle_socket(
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        let response = handle_message(&text, &stored_id, &lobby_id, &state).await;
+                        let response = handle_message(&text, &player_id, &lobby_id, &state).await;
                         if let Some(err_msg) = response {
                             let _ = sender.send(Message::Text(err_msg.into())).await;
                         }
@@ -221,54 +344,54 @@ async fn handle_socket(
     }
 
     // Player disconnected — mark as disconnected
-    {
-        let mut lobby = lobby_arc.lock().await;
-        lobby.session.remove_player(&player_id);
-        info!("Player {} disconnected from lobby {}", player_id, lobby_id);
-
-        // Set last_empty if no connected players remain
-        if !lobby.has_connected_players() {
-            lobby.last_empty = Some(Instant::now());
-        }
-
-        let state_json = serialize_state(&lobby);
-        let _ = lobby.tx.send(state_json);
-    }
+    // {
+    //     let mut lobby = lobby_arc.lock().await;
+    //     lobby.session.remove_player(&player_id);
+    //     info!("Player {} disconnected from lobby {}", player_id, lobby_id);
+    //
+    //     // Set last_empty if no connected players remain
+    //     if !lobby.has_connected_players() {
+    //         lobby.last_empty = Some(Instant::now());
+    //     }
+    //
+    //     let state_json = serialize_state(&lobby);
+    //     let _ = lobby.tx.send(state_json);
+    // }
 
     // After 20s, fully remove the player if they haven't reconnected
-    let timeout_lobby = lobby_arc.clone();
-    let timeout_id = player_id.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
-        let mut lobby = timeout_lobby.lock().await;
-        let still_disconnected = lobby
-            .session
-            .players
-            .iter()
-            .any(|p| p.id == timeout_id && !p.connected);
-        if still_disconnected {
-            info!("Player {} timed out, removing from lobby", timeout_id);
-            lobby.session.players.retain(|p| p.id != timeout_id);
-            // Clean up their data
-            lobby.session.votes.remove(&timeout_id);
-            lobby.session.votes_submitted.retain(|id| id != &timeout_id);
-            lobby.session.games.retain(|g| g.suggested_by != timeout_id);
-            for game in lobby.session.games.iter_mut() {
-                game.vetoed_by.retain(|id| id != &timeout_id);
-            }
-            // Reassign host if needed
-            if lobby.session.host_id.as_deref() == Some(&timeout_id) {
-                lobby.session.host_id = lobby
-                    .session
-                    .players
-                    .iter()
-                    .find(|p| p.connected)
-                    .map(|p| p.id.clone());
-            }
-            let state_json = serialize_state(&lobby);
-            let _ = lobby.tx.send(state_json);
-        }
-    });
+    // let timeout_lobby = lobby_arc.clone();
+    // let timeout_id = player_id.clone();
+    // tokio::spawn(async move {
+    //     tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+    //     let mut lobby = timeout_lobby.lock().await;
+    //     let still_disconnected = lobby
+    //         .session
+    //         .players
+    //         .iter()
+    //         .any(|p| p.id == timeout_id && !p.connected);
+    //     if still_disconnected {
+    //         info!("Player {} timed out, removing from lobby", timeout_id);
+    //         lobby.session.players.retain(|p| p.id != timeout_id);
+    //         // Clean up their data
+    //         lobby.session.votes.remove(&timeout_id);
+    //         lobby.session.votes_submitted.retain(|id| id != &timeout_id);
+    //         lobby.session.games.retain(|g| g.suggested_by != timeout_id);
+    //         for game in lobby.session.games.iter_mut() {
+    //             game.vetoed_by.retain(|id| id != &timeout_id);
+    //         }
+    //         // Reassign host if needed
+    //         if lobby.session.host_id.as_deref() == Some(&timeout_id) {
+    //             lobby.session.host_id = lobby
+    //                 .session
+    //                 .players
+    //                 .iter()
+    //                 .find(|p| p.connected)
+    //                 .map(|p| p.id.clone());
+    //         }
+    //         let state_json = serialize_state(&lobby);
+    //         let _ = lobby.tx.send(state_json);
+    //     }
+    // });
 }
 
 /// Returns Some(error_json) if an error message should be sent back to the client only,

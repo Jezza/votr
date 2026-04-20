@@ -11,7 +11,7 @@ export function VetoingPhase({ state, myId, isHost, send, myPlayer, getCountdown
   const allVetoed = state.games.length > 0 && state.games.every((g) => g.vetoed_by.length > 0);
 
   const handleToggleReady = () => {
-    send({ type: "set_ready", ready: !amReady });
+    send({ ty: "set_ready", ready: !amReady });
   };
 
   return (
@@ -52,8 +52,8 @@ export function VetoingPhase({ state, myId, isHost, send, myPlayer, getCountdown
                   onClick={() =>
                     send(
                       iVetoed
-                        ? { type: "unveto_game", game_id: game.id }
-                        : { type: "veto_game", game_id: game.id }
+                        ? { ty: "unveto_game", game_id: game.id }
+                        : { ty: "veto_game", game_id: game.id }
                     )
                   }
                   title={iVetoed ? "Remove veto" : "Veto this option"}
@@ -111,7 +111,7 @@ export function VetoingPhase({ state, myId, isHost, send, myPlayer, getCountdown
         <section className="card">
           <button
             className="btn btn-primary btn-full btn-large"
-            onClick={() => send({ type: "advance_phase" })}
+            onClick={() => send({ ty: "advance_phase" })}
             disabled={allVetoed}
           >
             {allVetoed

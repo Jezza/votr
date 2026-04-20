@@ -93,7 +93,7 @@ export function VotingPhase({ state, myId, isHost, send }: PhaseProps) {
   };
 
   const handleSubmit = () => {
-    send({ type: "submit_vote", ranking });
+    send({ ty: "submit_vote", ranking });
     setSubmitted(true);
   };
 
@@ -246,7 +246,7 @@ export function VotingPhase({ state, myId, isHost, send }: PhaseProps) {
         <section className="card">
           <button
             className="btn btn-primary btn-full btn-large"
-            onClick={() => send({ type: "advance_phase" })}
+            onClick={() => send({ ty: "advance_phase" })}
           >
             Advance to Results ({submittedCount}/{totalCount} submitted)
           </button>
