@@ -1,4 +1,4 @@
-import {
+import React, {
 	useCallback,
 	useEffect,
 	useRef,
@@ -14,7 +14,12 @@ import {LobbyBrowser} from "./LobbyBrowser";
 import {Toast} from "./Toast";
 import {GitHubLink} from "./GitHubLink";
 import {apiBase} from "./api";
-import {useApp} from "./store";
+import {
+	APP_CONTEXT,
+	type AppStore,
+	createAppStore,
+	useApp
+} from "./store";
 import {generateSeriousName} from "./names";
 
 const RECONNECT_DELAY = 2000;
@@ -32,7 +37,7 @@ function getLobbyIdFromUrl(): string | null {
 	return params.get("lobby");
 }
 
-export function App() {
+const AppInner = React.memo(() => {
 	const wsRef = useRef<WebSocket | null>(null);
 	// const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// const suppressReconnect = useRef(false);
@@ -399,6 +404,18 @@ export function App() {
 			</main>
 		</div>
 	);
-}
+});
 
-export default App;
+export const App = React.memo(() => {
+	const ref = React.useRef<AppStore | null>(null);
+	if (!ref.current) {
+		ref.current = createAppStore();
+	}
+
+	return (
+		<APP_CONTEXT value={ref.current}>
+			<AppInner/>
+		</APP_CONTEXT>
+	);
+});
+

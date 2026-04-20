@@ -4,6 +4,14 @@ use serde::{Deserialize, Serialize};
 #[serde(transparent)]
 pub struct PlayerId(pub String);
 
+impl std::fmt::Display for PlayerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Player(")?;
+        f.write_str(&self.0)?;
+        f.write_str(")")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
 #[serde(transparent)]
 pub struct LobbyId(pub String);
@@ -17,7 +25,9 @@ impl LobbyId {
 
 impl std::fmt::Display for LobbyId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        f.write_str("Lobby(")?;
+        f.write_str(&self.0)?;
+        f.write_str(")")
     }
 }
 
@@ -156,6 +166,14 @@ pub struct LobbyClosed {}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Error {
     pub message: String,
+}
+
+impl Error {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

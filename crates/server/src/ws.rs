@@ -7,6 +7,7 @@ use axum::{
     },
     response::Response,
 };
+use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use serde_json::Value;
@@ -16,7 +17,7 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
-use crate::lobby::{JoinOutcome, Lobby, MAX_PLAYERS, Opt, Phase, Player, VoteResult};
+use crate::lobby::{JoinOutcome, Lobby, MAX_PLAYERS};
 use crate::types;
 
 pub const MAX_LOBBIES: usize = 128;
@@ -49,60 +50,61 @@ impl AppState {
         public: bool,
         password: Option<String>,
     ) -> Result<(String, String), &'static str> {
-        if self.lobbies.len() >= MAX_LOBBIES {
-            return Err("too many lobbies");
-        }
-        let lobby = Lobby::new(public, password);
-        self.lobbies.insert(id.clone(), Arc::new(Mutex::new(lobby)));
-        Ok((id, name))
+        // if self.lobbies.len() >= MAX_LOBBIES {
+        //     return Err("too many lobbies");
+        // }
+        // let lobby = Lobby::new(public, password);
+        // self.lobbies.insert(id.clone(), Arc::new(Mutex::new(lobby)));
+        // Ok((id, name))
+        Err("test")
     }
 
-    pub fn remove_lobby(&mut self, id: &str) {
-        self.lobbies.remove(id);
-    }
-
-    pub fn get_lobby(&self, id: &str) -> Option<Arc<Mutex<Lobby>>> {
-        self.lobbies.get(id).cloned()
-    }
+    // pub fn remove_lobby(&mut self, id: &str) {
+    //     self.lobbies.remove(id);
+    // }
+    //
+    // pub fn get_lobby(&self, id: &str) -> Option<Arc<Mutex<Lobby>>> {
+    //     self.lobbies.get(id).cloned()
+    // }
 }
 
-#[derive(Serialize)]
-struct StateMessage<'a> {
-    #[serde(rename = "type")]
-    msg_type: &'static str,
-    phase: &'a Phase,
-    players: &'a Vec<Player>,
-    games: &'a Vec<Opt>,
-    votes_submitted: &'a Vec<String>,
-    results: &'a Option<Vec<VoteResult>>,
-    host_id: Option<&'a str>,
-    max_vetoes: u32,
-    lobby_id: &'a str,
-    lobby_name: &'a str,
-    lobby_public: bool,
-    lobby_locked: bool,
-    lobby_has_password: bool,
-}
-
-fn serialize_state(lobby: &Lobby) -> String {
-    let msg = StateMessage {
-        msg_type: "state",
-        phase: &lobby.phase,
-        players: &lobby.players,
-        games: &lobby.options,
-        votes_submitted: &lobby.votes_submitted,
-        results: &lobby.results,
-        host_id: lobby.host_id.as_deref(),
-        max_vetoes: lobby.max_vetoes,
-        lobby_id: &lobby.id,
-        lobby_name: &lobby.name,
-        lobby_public: lobby.public,
-        lobby_locked: lobby.locked,
-        lobby_has_password: lobby.password.is_some(),
-    };
-    serde_json::to_string(&msg)
-        .unwrap_or_else(|_| r#"{"type":"error","message":"serialization error"}"#.to_string())
-}
+// #[derive(Serialize)]
+// struct StateMessage<'a> {
+//     #[serde(rename = "type")]
+//     msg_type: &'static str,
+//     phase: &'a Phase,
+//     players: &'a Vec<Player>,
+//     games: &'a Vec<Opt>,
+//     votes_submitted: &'a Vec<String>,
+//     results: &'a Option<Vec<VoteResult>>,
+//     host_id: Option<&'a str>,
+//     max_vetoes: u32,
+//     lobby_id: &'a str,
+//     lobby_name: &'a str,
+//     lobby_public: bool,
+//     lobby_locked: bool,
+//     lobby_has_password: bool,
+// }
+//
+// fn serialize_state(lobby: &Lobby) -> String {
+//     let msg = StateMessage {
+//         msg_type: "state",
+//         phase: &lobby.phase,
+//         players: &lobby.players,
+//         games: &lobby.options,
+//         votes_submitted: &lobby.votes_submitted,
+//         results: &lobby.results,
+//         host_id: lobby.host_id.as_deref(),
+//         max_vetoes: lobby.max_vetoes,
+//         lobby_id: &lobby.id,
+//         lobby_name: &lobby.name,
+//         lobby_public: lobby.public,
+//         lobby_locked: lobby.locked,
+//         lobby_has_password: lobby.password.is_some(),
+//     };
+//     serde_json::to_string(&msg)
+//         .unwrap_or_else(|_| r#"{"type":"error","message":"serialization error"}"#.to_string())
+// }
 
 pub async fn handler(
     ws: WebSocketUpgrade,
@@ -144,7 +146,6 @@ pub async fn handler(
 
 macro_rules! send {
     ($sender:expr, $msg:expr) => {{
-        let sender = &{ $sender };
         let msg = types::Outgoing::from($msg);
 
         let value = match serde_json::to_string(&msg) {
@@ -155,11 +156,16 @@ macro_rules! send {
             }
         };
 
-        let _ = sender.send(Message::Text(value.into())).await;
+        let _ = $sender.send(Message::Text(value.into())).await;
     }};
 }
 
-async fn handle_socket(socket: WebSocket, mut state: AppState, info: types::JoinInfo, lobby: Lobby) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: AppState,
+    info: types::JoinInfo,
+    mut lobby: Lobby,
+) {
     let (mut sender, mut receiver) = socket.split();
 
     // let t = send!(sender, "");
@@ -177,13 +183,11 @@ async fn handle_socket(socket: WebSocket, mut state: AppState, info: types::Join
     let outcome = lobby.join(&info);
 
     let rx = match outcome {
-        // JoinOutcome::New => false,
-        // JoinOutcome::Rejoined => true,
         JoinOutcome::Joined(rx, _rejoined) => rx,
         JoinOutcome::Locked => {
             info!(
-                player_id = info.player_id,
-                lobby_id = info.lobby_id,
+                player_id = %info.player_id,
+                lobby_id = %info.lobby_id,
                 "lobby is locked"
             );
             send!(sender, types::Toast::error("Lobby is locked"));
@@ -191,8 +195,8 @@ async fn handle_socket(socket: WebSocket, mut state: AppState, info: types::Join
         }
         JoinOutcome::Kicked => {
             info!(
-                player_id = info.player_id,
-                lobby_id = info.lobby_id,
+                player_id = %info.player_id,
+                lobby_id = %info.lobby_id,
                 "played attempt to rejoin after being kicked"
             );
             send!(sender, types::Kicked {});
@@ -200,8 +204,8 @@ async fn handle_socket(socket: WebSocket, mut state: AppState, info: types::Join
         }
         JoinOutcome::LobbyFull => {
             info!(
-                player_id = info.player_id,
-                lobby_id = info.lobby_id,
+                player_id = %info.player_id,
+                lobby_id = %info.lobby_id,
                 "lobby is full"
             );
             send!(
@@ -210,88 +214,16 @@ async fn handle_socket(socket: WebSocket, mut state: AppState, info: types::Join
             );
             return;
         }
+        JoinOutcome::IncorrectPassword => {
+            info!(
+                player_id = %info.player_id,
+                lobby_id = %info.lobby_id,
+                "incorrect password"
+            );
+            send!(sender, types::Toast::error("Incorrect password"));
+            return;
+        }
     };
-
-    // player_id: String,
-    // name: String,
-    // lobby_id: String,
-    // password: Option<String>,
-
-    // state.loppies.join();
-
-    // Lock lobby for validation and player setup
-    // let rx = {
-    //     let Some(lobby) = state.loggies.find_lobby_mut(&lobby_id) else {
-    //         warn!(lobby_id, "lobby not found");
-    //         let msg = r#"{"type":"toast","message":"Lobby not found"}"#;
-    //         let _ = sender.send(Message::Text(msg.into())).await;
-    //         return;
-    //     };
-    //
-    //     // Locked lobbies only allow reconnecting players.
-    //     let outcome = if lobby.locked {
-    //         lobby.session.rejoin(&player_id, &name)
-    //     } else {
-    //         Some(lobby.session.add_player(&player_id, &name))
-    //     };
-    //
-    //     let outcome = match outcome {
-    //         Some(outcome @ (JoinOutcome::New | JoinOutcome::Rejoined)) => outcome,
-    //         Some(JoinOutcome::LobbyFull) => {
-    //             warn!(lobby_id, "player rejected: lobby full");
-    //             drop(lobby);
-    //             let msg = serde_json::json!({
-    //                 "type": "toast",
-    //                 "message": format!("Lobby is full (max {} players)", MAX_PLAYERS)
-    //             });
-    //             let _ = sender.send(Message::Text(msg.to_string().into())).await;
-    //             return;
-    //         }
-    //         Some(JoinOutcome::Kicked) => {
-    //             warn!(
-    //                 player_id = player_id,
-    //                 lobby_id, "kicked player tried to rejoin"
-    //             );
-    //             drop(lobby);
-    //             let msg = r#"{"type":"kicked"}"#;
-    //             let _ = sender.send(Message::Text(msg.into())).await;
-    //             return;
-    //         }
-    //         None => {
-    //             warn!(lobby_id, "player rejected: lobby is locked");
-    //             drop(lobby);
-    //             let msg = r#"{"type":"toast","message":"Lobby is locked"}"#;
-    //             let _ = sender.send(Message::Text(msg.into())).await;
-    //             return;
-    //         }
-    //     };
-    //
-    //     info!(
-    //         player_id = player_id,
-    //         lobby_id, "player connected ({:?})", outcome
-    //     );
-    //
-    //     // Only verify password on newcomers.
-    //     if matches!(outcome, JoinOutcome::New) {
-    //         if let Some(ref lobby_pw) = lobby.password {
-    //             let provided = password.as_deref().unwrap_or("");
-    //             if provided != lobby_pw {
-    //                 warn!(lobby_id, "player rejected: incorrect password");
-    //                 drop(lobby);
-    //                 let (mut sender, _) = socket.split();
-    //                 let msg = r#"{"type":"toast","message":"Incorrect password"}"#;
-    //                 let _ = sender.send(Message::Text(msg.into())).await;
-    //                 return;
-    //             }
-    //         }
-    //     }
-    //
-    //     // Subscribe BEFORE broadcasting so this client receives the state
-    //     let rx = lobby.tx.subscribe();
-    //     let state_json = serialize_state(&lobby);
-    //     let _ = lobby.tx.send(state_json);
-    //     rx
-    // };
 
     // Send welcome message to this client only
     // let welcome = serde_json::json!({
@@ -314,10 +246,7 @@ async fn handle_socket(socket: WebSocket, mut state: AppState, info: types::Join
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        let response = handle_message(&text, &player_id, &lobby_id, &state).await;
-                        if let Some(err_msg) = response {
-                            let _ = sender.send(Message::Text(err_msg.into())).await;
-                        }
+                        handle_message(state.clone(), &mut sender, lobby.clone(), &text, &info).await;
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     _ => {}
@@ -397,218 +326,220 @@ async fn handle_socket(socket: WebSocket, mut state: AppState, info: types::Join
 /// Returns Some(error_json) if an error message should be sent back to the client only,
 /// or None if the message was handled (broadcast already done inside).
 async fn handle_message(
+    state: AppState,
+    sender: &mut SplitSink<WebSocket, Message>,
+    lobby: Lobby,
     text: &str,
-    player_id: &str,
-    lobby: &Arc<Mutex<Lobby>>,
-    state: &AppState,
-) -> Option<String> {
-    let value: Value = match serde_json::from_str(text) {
+    info: &types::JoinInfo,
+) {
+    let value: types::Incoming = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(_) => {
-            return Some(r#"{"type":"error","message":"invalid JSON"}"#.to_string());
+            send!(sender, types::Error::new("invalid JSON"));
+            return;
         }
     };
 
-    let msg_type = match value.get("type").and_then(|v| v.as_str()) {
-        Some(t) => t.to_string(),
-        None => {
-            return Some(r#"{"type":"error","message":"missing type field"}"#.to_string());
-        }
-    };
+    // let msg_type = match value.get("type").and_then(|v| v.as_str()) {
+    //     Some(t) => t.to_string(),
+    //     None => {
+    //         return Some(r#"{"type":"error","message":"missing type field"}"#.to_string());
+    //     }
+    // };
+    //
+    // let mut lobby_guard = lobby.lock().await;
+    // let is_host = lobby_guard.session.get_host_id() == Some(player_id);
+    // let lobby_id = lobby_guard.id.clone();
+    //
+    // debug!(player_id, %lobby_id, %msg_type, "received message");
+    //
+    // match msg_type.as_str() {
+    //     "set_name" => {
+    //         let name = value
+    //             .get("name")
+    //             .and_then(|v| v.as_str())
+    //             .unwrap_or("")
+    //             .to_string();
+    //         if let Some(player) = lobby_guard
+    //             .session
+    //             .players
+    //             .iter_mut()
+    //             .find(|p| p.id == player_id)
+    //         {
+    //             if !name.trim().is_empty() {
+    //                 player.name = name;
+    //             }
+    //         }
+    //     }
+    //     "add_game" => {
+    //         let name = value
+    //             .get("name")
+    //             .and_then(|v| v.as_str())
+    //             .unwrap_or("")
+    //             .to_string();
+    //         lobby_guard.session.add_game(player_id, &name);
+    //     }
+    //     "remove_game" => {
+    //         let game_id = value
+    //             .get("game_id")
+    //             .and_then(|v| v.as_str())
+    //             .unwrap_or("")
+    //             .to_string();
+    //         lobby_guard.session.remove_game(player_id, &game_id);
+    //     }
+    //     "veto_game" => {
+    //         let game_id = value
+    //             .get("game_id")
+    //             .and_then(|v| v.as_str())
+    //             .unwrap_or("")
+    //             .to_string();
+    //         lobby_guard.session.veto_game(player_id, &game_id);
+    //     }
+    //     "unveto_game" => {
+    //         let game_id = value
+    //             .get("game_id")
+    //             .and_then(|v| v.as_str())
+    //             .unwrap_or("")
+    //             .to_string();
+    //         lobby_guard.session.unveto_game(player_id, &game_id);
+    //     }
+    //     "submit_vote" => {
+    //         let ranking: Vec<String> = value
+    //             .get("ranking")
+    //             .and_then(|v| v.as_array())
+    //             .map(|arr| {
+    //                 arr.iter()
+    //                     .filter_map(|v| v.as_str().map(|s| s.to_string()))
+    //                     .collect()
+    //             })
+    //             .unwrap_or_default();
+    //         let all_voted = lobby_guard.session.submit_vote(player_id, ranking);
+    //         if all_voted {
+    //             lobby_guard.session.advance_phase();
+    //         }
+    //     }
+    //     "set_ready" => {
+    //         let ready = value
+    //             .get("ready")
+    //             .and_then(|v| v.as_bool())
+    //             .unwrap_or(false);
+    //         lobby_guard.session.set_ready(player_id, ready);
+    //     }
+    //     "advance_phase" => {
+    //         if !is_host {
+    //             return Some(
+    //                 r#"{"type":"error","message":"only the host can advance the phase"}"#
+    //                     .to_string(),
+    //             );
+    //         }
+    //         lobby_guard.session.advance_phase();
+    //         info!(lobby_id, phase = ?lobby_guard.session.phase, "phase advanced");
+    //     }
+    //     "reset_session" => {
+    //         if !is_host {
+    //             return Some(
+    //                 r#"{"type":"error","message":"only the host can reset the session"}"#
+    //                     .to_string(),
+    //             );
+    //         }
+    //         lobby_guard.session.reset();
+    //         info!(lobby_id, "session reset");
+    //     }
+    //     "kick_player" => {
+    //         if !is_host {
+    //             return Some(
+    //                 r#"{"type":"error","message":"only the host can kick players"}"#.to_string(),
+    //             );
+    //         }
+    //         let target_id = value
+    //             .get("target_id")
+    //             .and_then(|v| v.as_str())
+    //             .unwrap_or("")
+    //             .to_string();
+    //         if target_id == player_id {
+    //             return Some(
+    //                 r#"{"type":"error","message":"you cannot kick yourself"}"#.to_string(),
+    //             );
+    //         }
+    //         lobby_guard.session.kick_player(&target_id);
+    //         info!(lobby_id, target_id, "player kicked");
+    //     }
+    //     "set_max_vetoes" => {
+    //         if !is_host {
+    //             return Some(
+    //                 r#"{"type":"error","message":"only the host can change veto count"}"#
+    //                     .to_string(),
+    //             );
+    //         }
+    //         let count = value.get("count").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+    //         lobby_guard.session.set_max_vetoes(count);
+    //     }
+    //     "set_lobby_public" => {
+    //         if !is_host {
+    //             return Some(
+    //                 r#"{"type":"error","message":"only the host can change lobby visibility"}"#
+    //                     .to_string(),
+    //             );
+    //         }
+    //         let public = value
+    //             .get("public")
+    //             .and_then(|v| v.as_bool())
+    //             .unwrap_or(true);
+    //         lobby_guard.public = public;
+    //     }
+    //     "set_lobby_password" => {
+    //         if !is_host {
+    //             return Some(
+    //                 r#"{"type":"error","message":"only the host can change the password"}"#
+    //                     .to_string(),
+    //             );
+    //         }
+    //         let pw = value
+    //             .get("password")
+    //             .and_then(|v| v.as_str())
+    //             .unwrap_or("")
+    //             .to_string();
+    //         let trimmed: String = pw.chars().take(64).collect();
+    //         lobby_guard.password = if trimmed.is_empty() {
+    //             None
+    //         } else {
+    //             Some(trimmed)
+    //         };
+    //     }
+    //     "set_lobby_locked" => {
+    //         if !is_host {
+    //             return Some(
+    //                 r#"{"type":"error","message":"only the host can lock/unlock the lobby"}"#
+    //                     .to_string(),
+    //             );
+    //         }
+    //         let locked = value
+    //             .get("locked")
+    //             .and_then(|v| v.as_bool())
+    //             .unwrap_or(false);
+    //         lobby_guard.locked = locked;
+    //     }
+    //     "close_lobby" => {
+    //         if !is_host {
+    //             return Some(
+    //                 r#"{"type":"error","message":"only the host can close the lobby"}"#.to_string(),
+    //             );
+    //         }
+    //         info!(lobby_id, "lobby closed by host");
+    //         let closed_msg = r#"{"type":"lobby_closed"}"#.to_string();
+    //         let _ = lobby_guard.tx.send(closed_msg);
+    //         let lobby_id_owned = lobby_guard.id.clone();
+    //         drop(lobby_guard);
+    //         let mut manager = state.lobbies.lock().await;
+    //         manager.remove_lobby(&lobby_id_owned);
+    //         return None;
+    //     }
+    //     _ => {
+    //         return Some(r#"{"type":"error","message":"unknown message type"}"#.to_string());
+    //     }
+    // }
 
-    let mut lobby_guard = lobby.lock().await;
-    let is_host = lobby_guard.session.get_host_id() == Some(player_id);
-    let lobby_id = lobby_guard.id.clone();
-
-    debug!(player_id, %lobby_id, %msg_type, "received message");
-
-    match msg_type.as_str() {
-        "set_name" => {
-            let name = value
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            if let Some(player) = lobby_guard
-                .session
-                .players
-                .iter_mut()
-                .find(|p| p.id == player_id)
-            {
-                if !name.trim().is_empty() {
-                    player.name = name;
-                }
-            }
-        }
-        "add_game" => {
-            let name = value
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            lobby_guard.session.add_game(player_id, &name);
-        }
-        "remove_game" => {
-            let game_id = value
-                .get("game_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            lobby_guard.session.remove_game(player_id, &game_id);
-        }
-        "veto_game" => {
-            let game_id = value
-                .get("game_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            lobby_guard.session.veto_game(player_id, &game_id);
-        }
-        "unveto_game" => {
-            let game_id = value
-                .get("game_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            lobby_guard.session.unveto_game(player_id, &game_id);
-        }
-        "submit_vote" => {
-            let ranking: Vec<String> = value
-                .get("ranking")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let all_voted = lobby_guard.session.submit_vote(player_id, ranking);
-            if all_voted {
-                lobby_guard.session.advance_phase();
-            }
-        }
-        "set_ready" => {
-            let ready = value
-                .get("ready")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            lobby_guard.session.set_ready(player_id, ready);
-        }
-        "advance_phase" => {
-            if !is_host {
-                return Some(
-                    r#"{"type":"error","message":"only the host can advance the phase"}"#
-                        .to_string(),
-                );
-            }
-            lobby_guard.session.advance_phase();
-            info!(lobby_id, phase = ?lobby_guard.session.phase, "phase advanced");
-        }
-        "reset_session" => {
-            if !is_host {
-                return Some(
-                    r#"{"type":"error","message":"only the host can reset the session"}"#
-                        .to_string(),
-                );
-            }
-            lobby_guard.session.reset();
-            info!(lobby_id, "session reset");
-        }
-        "kick_player" => {
-            if !is_host {
-                return Some(
-                    r#"{"type":"error","message":"only the host can kick players"}"#.to_string(),
-                );
-            }
-            let target_id = value
-                .get("target_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            if target_id == player_id {
-                return Some(
-                    r#"{"type":"error","message":"you cannot kick yourself"}"#.to_string(),
-                );
-            }
-            lobby_guard.session.kick_player(&target_id);
-            info!(lobby_id, target_id, "player kicked");
-        }
-        "set_max_vetoes" => {
-            if !is_host {
-                return Some(
-                    r#"{"type":"error","message":"only the host can change veto count"}"#
-                        .to_string(),
-                );
-            }
-            let count = value.get("count").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
-            lobby_guard.session.set_max_vetoes(count);
-        }
-        "set_lobby_public" => {
-            if !is_host {
-                return Some(
-                    r#"{"type":"error","message":"only the host can change lobby visibility"}"#
-                        .to_string(),
-                );
-            }
-            let public = value
-                .get("public")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-            lobby_guard.public = public;
-        }
-        "set_lobby_password" => {
-            if !is_host {
-                return Some(
-                    r#"{"type":"error","message":"only the host can change the password"}"#
-                        .to_string(),
-                );
-            }
-            let pw = value
-                .get("password")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let trimmed: String = pw.chars().take(64).collect();
-            lobby_guard.password = if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            };
-        }
-        "set_lobby_locked" => {
-            if !is_host {
-                return Some(
-                    r#"{"type":"error","message":"only the host can lock/unlock the lobby"}"#
-                        .to_string(),
-                );
-            }
-            let locked = value
-                .get("locked")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            lobby_guard.locked = locked;
-        }
-        "close_lobby" => {
-            if !is_host {
-                return Some(
-                    r#"{"type":"error","message":"only the host can close the lobby"}"#.to_string(),
-                );
-            }
-            info!(lobby_id, "lobby closed by host");
-            let closed_msg = r#"{"type":"lobby_closed"}"#.to_string();
-            let _ = lobby_guard.tx.send(closed_msg);
-            let lobby_id_owned = lobby_guard.id.clone();
-            drop(lobby_guard);
-            let mut manager = state.lobbies.lock().await;
-            manager.remove_lobby(&lobby_id_owned);
-            return None;
-        }
-        _ => {
-            return Some(r#"{"type":"error","message":"unknown message type"}"#.to_string());
-        }
-    }
-
-    let state_json = serialize_state(&lobby_guard);
-    let _ = lobby_guard.tx.send(state_json);
-    None
+    // let state_json = serialize_state(&lobby_guard);
+    // let _ = lobby_guard.tx.send(state_json);
+    // None
 }

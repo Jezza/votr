@@ -1,5 +1,5 @@
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
-use lobby::{LOBBY_CLEANUP_INTERVAL, LOBBY_EMPTY_TIMEOUT, LobbyManager};
+// use lobby::{LOBBY_CLEANUP_INTERVAL, LOBBY_EMPTY_TIMEOUT, LobbyManager};
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -7,7 +7,6 @@ use tower_http::cors::CorsLayer;
 use tracing::info;
 use ws::{AppState, handler};
 
-mod lobby;
 mod lobby;
 mod ws;
 mod types;
@@ -28,7 +27,7 @@ async fn main() {
 
     // let lobbies = Arc::new(Mutex::new(LobbyManager::new()));
     let state = AppState {
-        // loppies: Default::default(),
+        lobbies: Default::default(),
     };
 
     // // Spawn cleanup task — every 10s, remove lobbies empty for 60s+
@@ -67,7 +66,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/ws", get(handler))
-        // .route("/api/lobbies", get(list_lobbies).post(create_lobby))
+        .route("/api/lobbies", get(list_lobbies).post(create_lobby))
         .fallback_service(axum_embed::ServeEmbed::<Assets>::new())
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -82,58 +81,36 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-// async fn list_lobbies(State(state): State<AppState>) -> Json<Vec<lobby::LobbyInfo>> {
-//     let manager = state.lobbies.lock().await;
-//     let mut lobbies = Vec::new();
-//     for lobby_arc in manager.lobbies.values() {
-//         let Ok(lobby) = lobby_arc.try_lock() else {
-//             continue;
-//         };
-//
-//         if !lobby.public {
-//             continue;
-//         }
-//
-//         let player_count = lobby
-//             .session
-//             .players
-//             .iter()
-//             .filter(|p| p.is_connected())
-//             .count();
-//
-//         lobbies.push(lobby::LobbyInfo {
-//             id: lobby.id.clone(),
-//             name: lobby.name.clone(),
-//             player_count,
-//             max_players: session::MAX_PLAYERS,
-//             has_password: lobby.password.is_some(),
-//             locked: lobby.locked,
-//             phase: format!("{:?}", lobby.session.phase).to_lowercase(),
-//         });
-//     }
-//     Json(lobbies)
-// }
-//
-// async fn create_lobby(
-//     State(state): State<AppState>,
-//     Json(req): Json<CreateLobbyRequest>,
-// ) -> Result<Json<serde_json::Value>, StatusCode> {
-//     let mut manager = state.lobbies.lock().await;
-//
-//     let public = req.public.unwrap_or(true);
-//     let password = req.password.and_then(|mut pw| {
-//         pw.truncate(64);
-//         (!pw.is_empty()).then_some(pw)
-//     });
-//
-//     match manager.create_lobby(public, password) {
-//         Ok((id, name)) => {
-//             info!(lobby_id = id, lobby_name = name, public, "lobby created");
-//             Ok(Json(serde_json::json!({ "id": id, "name": name })))
-//         }
-//         Err(_) => {
-//             info!("lobby creation rejected: too many lobbies");
-//             Err(StatusCode::TOO_MANY_REQUESTS)
-//         }
-//     }
-// }
+async fn list_lobbies(State(state): State<AppState>) -> Json<Vec<lobby::LobbyInfo>> {
+    let manager = state.lobbies.lock().await;
+    let mut lobbies = Vec::new();
+    for lobby_arc in manager.lobbies.values() {
+        let Ok(lobby) = lobby_arc.try_lock() else {
+            continue;
+        };
+
+        if !lobby.public {
+            continue;
+        }
+
+        let player_count = lobby
+            .session
+            .players
+            .iter()
+            .filter(|p| p.is_connected())
+            .count();
+
+        lobbies.push(lobby::LobbyInfo {
+            id: lobby.id.clone(),
+            name: lobby.name.clone(),
+            player_count,
+            max_players: session::MAX_PLAYERS,
+            has_password: lobby.password.is_some(),
+            locked: lobby.locked,
+            phase: format!("{:?}", lobby.session.phase).to_lowercase(),
+        });
+    }
+    Json(lobbies)
+}
+
+
