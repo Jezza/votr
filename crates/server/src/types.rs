@@ -1,18 +1,18 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
 #[serde(transparent)]
 pub struct PlayerId(pub String);
 
 impl std::fmt::Display for PlayerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Player(")?;
+        f.write_str("PlayerId(")?;
         f.write_str(&self.0)?;
         f.write_str(")")
     }
 }
 
-#[derive(Debug, Clone, Serialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
 #[serde(transparent)]
 pub struct LobbyId(pub String);
 
@@ -25,7 +25,26 @@ impl LobbyId {
 
 impl std::fmt::Display for LobbyId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Lobby(")?;
+        f.write_str("LobbyId(")?;
+        f.write_str(&self.0)?;
+        f.write_str(")")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[serde(transparent)]
+pub struct OptId(pub String);
+
+impl OptId {
+    pub fn rand() -> Self {
+        let id = uuid::Uuid::new_v4().to_string();
+        Self(id)
+    }
+}
+
+impl std::fmt::Display for OptId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OptId(")?;
         f.write_str(&self.0)?;
         f.write_str(")")
     }
@@ -71,28 +90,28 @@ impl Player {
 #[derive(Debug, Clone, Serialize)]
 pub enum ConnectionStatus {
     Connected,
-    Kicked,
+    // Kicked,
     /// Seconds remaining before this player is removed (None if connected)
     Disconnected(u32),
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Opt {
-    pub id: String,
+    pub id: OptId,
     pub name: String,
-    pub suggested_by: String,
-    pub vetoed_by: Option<String>,
+    pub suggested_by: PlayerId,
+    pub vetoed_by: Option<PlayerId>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct VoteResult {
-    pub game_id: String,
+    pub game_id: OptId,
     pub game_name: String,
     pub score: u32,
     pub rank: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "ty", rename_all = "snake_case")]
 pub enum Outgoing {
     Welcome(Welcome),
@@ -152,18 +171,18 @@ pub enum Incoming {
     CloseLobby,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Welcome {
     pub lobby_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct Kicked {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct LobbyClosed {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Error {
     pub message: String,
 }
@@ -176,7 +195,7 @@ impl Error {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ToastLevel {
     Info,
@@ -184,7 +203,7 @@ pub enum ToastLevel {
     Warning,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Toast {
     pub message: String,
     pub level: ToastLevel,
@@ -213,6 +232,8 @@ impl Toast {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SetName {
+    #[serde(default)]
+    pub player_id: Option<PlayerId>,
     pub name: String,
 }
 
@@ -223,22 +244,22 @@ pub struct AddGame {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RemoveGame {
-    pub game_id: String,
+    pub game_id: OptId,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VetoGame {
-    pub game_id: String,
+    pub game_id: OptId,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UnvetoGame {
-    pub game_id: String,
+    pub game_id: OptId,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubmitVote {
-    pub ranking: Vec<String>,
+    pub ranking: Vec<OptId>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -253,7 +274,7 @@ pub struct SetMaxVetoes {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KickPlayer {
-    pub target_id: String,
+    pub target_id: PlayerId,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

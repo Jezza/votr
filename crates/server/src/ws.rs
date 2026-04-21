@@ -24,25 +24,22 @@ pub const MAX_LOBBIES: usize = 128;
 pub const LOBBY_EMPTY_TIMEOUT: u64 = 60;
 pub const LOBBY_CLEANUP_INTERVAL: u64 = 10;
 
+type Shared<T> = Arc<Mutex<T>>;
+
 #[derive(Clone)]
 pub struct AppState {
-    pub lobbies: Arc<Mutex<HashMap<types::LobbyId, Lobby>>>,
-    // pub lobbies: Arc<Mutex<LobbyManager>>,
-    // pub loggies: LoggyManager,
-    // pub loppies: LoggyManager,
+    pub lobbies: Shared<HashMap<types::LobbyId, Shared<Lobby>>>,
 }
 
 impl AppState {
-    pub fn find_lobby(&self, lobby_id: &types::LobbyId) -> Option<Lobby> {
-        // let types::JoinInfo {
-        //     player_id,
-        //     name,
-        //     lobby_id,
-        //     password,
-        // } = info;
+    pub async fn find_lobby(&self, lobby_id: &types::LobbyId) -> Option<Shared<Lobby>> {
+        let lobbies = self.lobbies.lock().await;
+        lobbies.get(lobby_id).cloned()
+    }
 
-        // JoinOutcome::Kicked
-        None
+    pub async fn remove_lobby(&self, lobby_id: &types::LobbyId) -> Option<Shared<Lobby>> {
+        let mut lobbies = self.lobbies.lock().await;
+        lobbies.remove(lobby_id)
     }
 
     pub fn create_lobby(
@@ -136,7 +133,7 @@ pub async fn handler(
         password,
     };
 
-    let Some(lobby) = state.find_lobby(&info.lobby_id) else {
+    let Some(lobby) = state.find_lobby(&info.lobby_id).await else {
         warn!("someone sent a request without a `lobby_id`");
         return StatusCode::BAD_REQUEST.into_response();
     };
@@ -148,15 +145,16 @@ macro_rules! send {
     ($sender:expr, $msg:expr) => {{
         let msg = types::Outgoing::from($msg);
 
-        let value = match serde_json::to_string(&msg) {
-            Ok(value) => value,
+        match serde_json::to_string(&msg) {
+            Ok(value) => {
+                let _ = $sender.send(Message::Text(value.into())).await;
+                Ok(())
+            }
             Err(err) => {
                 ::tracing::error!("unable to serialise message: {}", err);
-                return;
+                Err(())
             }
-        };
-
-        let _ = $sender.send(Message::Text(value.into())).await;
+        }
     }};
 }
 
@@ -164,23 +162,14 @@ async fn handle_socket(
     socket: WebSocket,
     state: AppState,
     info: types::JoinInfo,
-    mut lobby: Lobby,
+    mut lobby: Shared<Lobby>,
 ) {
     let (mut sender, mut receiver) = socket.split();
 
-    // let t = send!(sender, "");
-
-    // let Some(lobby) = state.find_lobby(&info.lobby_id) else {
-    //     info!(
-    //         player_id = info.player_id,
-    //         lobby_id = info.lobby_id,
-    //         "unable to find lobby"
-    //     );
-    //     send!(sender, types::Toast::error("Lobby not found"));
-    //     return;
-    // };
-
-    let outcome = lobby.join(&info);
+    let outcome = {
+        let mut lobby = lobby.lock().await;
+        lobby.join(&info)
+    };
 
     let rx = match outcome {
         JoinOutcome::Joined(rx, _rejoined) => rx,
@@ -254,14 +243,19 @@ async fn handle_socket(
             }
             result = rx.recv() => {
                 match result {
-                    Ok(broadcast_msg) => {
-                        if sender.send(Message::Text(broadcast_msg.into())).await.is_err() {
+                    Ok(msg) => {
+                        let closed = matches!(msg, types::Outgoing::LobbyClosed(_));
+
+                        if send!(sender, msg).is_err() {
+                            break;
+                        }
+
+                        if closed {
                             break;
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        let msg = r#"{"type":"lobby_closed"}"#;
-                        let _ = sender.send(Message::Text(msg.into())).await;
+                        send!(sender, types::LobbyClosed {});
                         break;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
@@ -273,7 +267,8 @@ async fn handle_socket(
     }
 
     // Player disconnected — mark as disconnected
-    // {
+    {
+        
     //     let mut lobby = lobby_arc.lock().await;
     //     lobby.session.remove_player(&player_id);
     //     info!("Player {} disconnected from lobby {}", player_id, lobby_id);
@@ -285,7 +280,7 @@ async fn handle_socket(
     //
     //     let state_json = serialize_state(&lobby);
     //     let _ = lobby.tx.send(state_json);
-    // }
+    }
 
     // After 20s, fully remove the player if they haven't reconnected
     // let timeout_lobby = lobby_arc.clone();
@@ -328,7 +323,7 @@ async fn handle_socket(
 async fn handle_message(
     state: AppState,
     sender: &mut SplitSink<WebSocket, Message>,
-    lobby: Lobby,
+    lobby: Shared<Lobby>,
     text: &str,
     info: &types::JoinInfo,
 ) {
@@ -340,206 +335,71 @@ async fn handle_message(
         }
     };
 
-    // let msg_type = match value.get("type").and_then(|v| v.as_str()) {
-    //     Some(t) => t.to_string(),
-    //     None => {
-    //         return Some(r#"{"type":"error","message":"missing type field"}"#.to_string());
-    //     }
-    // };
-    //
-    // let mut lobby_guard = lobby.lock().await;
-    // let is_host = lobby_guard.session.get_host_id() == Some(player_id);
-    // let lobby_id = lobby_guard.id.clone();
-    //
-    // debug!(player_id, %lobby_id, %msg_type, "received message");
-    //
-    // match msg_type.as_str() {
-    //     "set_name" => {
-    //         let name = value
-    //             .get("name")
-    //             .and_then(|v| v.as_str())
-    //             .unwrap_or("")
-    //             .to_string();
-    //         if let Some(player) = lobby_guard
-    //             .session
-    //             .players
-    //             .iter_mut()
-    //             .find(|p| p.id == player_id)
-    //         {
-    //             if !name.trim().is_empty() {
-    //                 player.name = name;
-    //             }
-    //         }
-    //     }
-    //     "add_game" => {
-    //         let name = value
-    //             .get("name")
-    //             .and_then(|v| v.as_str())
-    //             .unwrap_or("")
-    //             .to_string();
-    //         lobby_guard.session.add_game(player_id, &name);
-    //     }
-    //     "remove_game" => {
-    //         let game_id = value
-    //             .get("game_id")
-    //             .and_then(|v| v.as_str())
-    //             .unwrap_or("")
-    //             .to_string();
-    //         lobby_guard.session.remove_game(player_id, &game_id);
-    //     }
-    //     "veto_game" => {
-    //         let game_id = value
-    //             .get("game_id")
-    //             .and_then(|v| v.as_str())
-    //             .unwrap_or("")
-    //             .to_string();
-    //         lobby_guard.session.veto_game(player_id, &game_id);
-    //     }
-    //     "unveto_game" => {
-    //         let game_id = value
-    //             .get("game_id")
-    //             .and_then(|v| v.as_str())
-    //             .unwrap_or("")
-    //             .to_string();
-    //         lobby_guard.session.unveto_game(player_id, &game_id);
-    //     }
-    //     "submit_vote" => {
-    //         let ranking: Vec<String> = value
-    //             .get("ranking")
-    //             .and_then(|v| v.as_array())
-    //             .map(|arr| {
-    //                 arr.iter()
-    //                     .filter_map(|v| v.as_str().map(|s| s.to_string()))
-    //                     .collect()
-    //             })
-    //             .unwrap_or_default();
-    //         let all_voted = lobby_guard.session.submit_vote(player_id, ranking);
-    //         if all_voted {
-    //             lobby_guard.session.advance_phase();
-    //         }
-    //     }
-    //     "set_ready" => {
-    //         let ready = value
-    //             .get("ready")
-    //             .and_then(|v| v.as_bool())
-    //             .unwrap_or(false);
-    //         lobby_guard.session.set_ready(player_id, ready);
-    //     }
-    //     "advance_phase" => {
-    //         if !is_host {
-    //             return Some(
-    //                 r#"{"type":"error","message":"only the host can advance the phase"}"#
-    //                     .to_string(),
-    //             );
-    //         }
-    //         lobby_guard.session.advance_phase();
-    //         info!(lobby_id, phase = ?lobby_guard.session.phase, "phase advanced");
-    //     }
-    //     "reset_session" => {
-    //         if !is_host {
-    //             return Some(
-    //                 r#"{"type":"error","message":"only the host can reset the session"}"#
-    //                     .to_string(),
-    //             );
-    //         }
-    //         lobby_guard.session.reset();
-    //         info!(lobby_id, "session reset");
-    //     }
-    //     "kick_player" => {
-    //         if !is_host {
-    //             return Some(
-    //                 r#"{"type":"error","message":"only the host can kick players"}"#.to_string(),
-    //             );
-    //         }
-    //         let target_id = value
-    //             .get("target_id")
-    //             .and_then(|v| v.as_str())
-    //             .unwrap_or("")
-    //             .to_string();
-    //         if target_id == player_id {
-    //             return Some(
-    //                 r#"{"type":"error","message":"you cannot kick yourself"}"#.to_string(),
-    //             );
-    //         }
-    //         lobby_guard.session.kick_player(&target_id);
-    //         info!(lobby_id, target_id, "player kicked");
-    //     }
-    //     "set_max_vetoes" => {
-    //         if !is_host {
-    //             return Some(
-    //                 r#"{"type":"error","message":"only the host can change veto count"}"#
-    //                     .to_string(),
-    //             );
-    //         }
-    //         let count = value.get("count").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
-    //         lobby_guard.session.set_max_vetoes(count);
-    //     }
-    //     "set_lobby_public" => {
-    //         if !is_host {
-    //             return Some(
-    //                 r#"{"type":"error","message":"only the host can change lobby visibility"}"#
-    //                     .to_string(),
-    //             );
-    //         }
-    //         let public = value
-    //             .get("public")
-    //             .and_then(|v| v.as_bool())
-    //             .unwrap_or(true);
-    //         lobby_guard.public = public;
-    //     }
-    //     "set_lobby_password" => {
-    //         if !is_host {
-    //             return Some(
-    //                 r#"{"type":"error","message":"only the host can change the password"}"#
-    //                     .to_string(),
-    //             );
-    //         }
-    //         let pw = value
-    //             .get("password")
-    //             .and_then(|v| v.as_str())
-    //             .unwrap_or("")
-    //             .to_string();
-    //         let trimmed: String = pw.chars().take(64).collect();
-    //         lobby_guard.password = if trimmed.is_empty() {
-    //             None
-    //         } else {
-    //             Some(trimmed)
-    //         };
-    //     }
-    //     "set_lobby_locked" => {
-    //         if !is_host {
-    //             return Some(
-    //                 r#"{"type":"error","message":"only the host can lock/unlock the lobby"}"#
-    //                     .to_string(),
-    //             );
-    //         }
-    //         let locked = value
-    //             .get("locked")
-    //             .and_then(|v| v.as_bool())
-    //             .unwrap_or(false);
-    //         lobby_guard.locked = locked;
-    //     }
-    //     "close_lobby" => {
-    //         if !is_host {
-    //             return Some(
-    //                 r#"{"type":"error","message":"only the host can close the lobby"}"#.to_string(),
-    //             );
-    //         }
-    //         info!(lobby_id, "lobby closed by host");
-    //         let closed_msg = r#"{"type":"lobby_closed"}"#.to_string();
-    //         let _ = lobby_guard.tx.send(closed_msg);
-    //         let lobby_id_owned = lobby_guard.id.clone();
-    //         drop(lobby_guard);
-    //         let mut manager = state.lobbies.lock().await;
-    //         manager.remove_lobby(&lobby_id_owned);
-    //         return None;
-    //     }
-    //     _ => {
-    //         return Some(r#"{"type":"error","message":"unknown message type"}"#.to_string());
-    //     }
-    // }
+    match value {
+        types::Incoming::SetName(msg) => {
+            let player_id = msg.player_id.as_ref().unwrap_or(&info.player_id);
+
+            let mut lobby = lobby.lock().await;
+            lobby.set_name(&player_id, msg.name);
+        }
+        types::Incoming::AddGame(msg) => {
+            let mut lobby = lobby.lock().await;
+            lobby.add_game(&info.player_id, msg.name);
+        }
+        types::Incoming::RemoveGame(msg) => {
+            let mut lobby = lobby.lock().await;
+            lobby.remove_game(&info.player_id, &msg.game_id);
+        }
+        types::Incoming::VetoGame(msg) => {
+            let mut lobby = lobby.lock().await;
+            lobby.veto_game(&info.player_id, &msg.game_id);
+        }
+        types::Incoming::UnvetoGame(msg) => {
+            let mut lobby = lobby.lock().await;
+            lobby.unveto_game(&info.player_id, &msg.game_id);
+        }
+        types::Incoming::SubmitVote(msg) => {
+            let mut lobby = lobby.lock().await;
+            lobby.submit_vote(&info.player_id, msg.ranking);
+        }
+        types::Incoming::SetReady(msg) => {
+            let mut lobby = lobby.lock().await;
+            lobby.set_ready(&info.player_id, msg.ready);
+        }
+        types::Incoming::AdvancePhase => {
+            let mut lobby = lobby.lock().await;
+            lobby.advance_phase();
+        }
+        types::Incoming::ResetSession => {
+            let mut lobby = lobby.lock().await;
+            lobby.reset();
+        }
+        types::Incoming::SetMaxVetoes(msg) => {
+            let mut lobby = lobby.lock().await;
+            lobby.set_max_vetoes(msg.count);
+        }
+        types::Incoming::KickPlayer(msg) => {
+            let mut lobby = lobby.lock().await;
+            lobby.kick_player(&msg.target_id);
+        }
+        types::Incoming::SetLobbyPublic(msg) => {
+            let mut lobby = lobby.lock().await;
+            lobby.set_lobby_public(&info.player_id, msg.public);
+        }
+        types::Incoming::SetLobbyPassword(msg) => {
+            let mut lobby = lobby.lock().await;
+            lobby.set_lobby_password(&info.player_id, msg.password);
+        }
+        types::Incoming::SetLobbyLocked(msg) => {
+            let mut lobby = lobby.lock().await;
+            lobby.set_lobby_locked(&info.player_id, msg.locked);
+        }
+        types::Incoming::CloseLobby => {
+            let mut lobby = lobby.lock().await;
+            lobby.close(&info.player_id);
+        }
+    }
 
     // let state_json = serialize_state(&lobby_guard);
     // let _ = lobby_guard.tx.send(state_json);
-    // None
 }

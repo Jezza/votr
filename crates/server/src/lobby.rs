@@ -8,7 +8,7 @@ use crate::types;
 
 #[derive(Debug)]
 pub enum JoinOutcome {
-    Joined(broadcast::Receiver<String>, bool),
+    Joined(broadcast::Receiver<types::Outgoing>, bool),
     Locked,
     Kicked,
     LobbyFull,
@@ -17,28 +17,31 @@ pub enum JoinOutcome {
 
 pub const MAX_PLAYERS: usize = 8;
 
-#[derive(Clone)]
-pub struct Lobby(Arc<Mutex<Inner>>);
+// #[derive(Clone)]
+// pub struct Lobby(Arc<Mutex<Inner>>);
 
 // #[derive(Debug, Clone)]
-pub struct Inner {
+pub struct Lobby {
     pub id: types::LobbyId,
+    pub tx: broadcast::Sender<types::Outgoing>,
+
     pub name: String,
     pub public: bool,
     pub password: Option<String>,
     pub locked: bool,
-    pub tx: broadcast::Sender<String>,
+
     pub last_empty: Option<Instant>,
+    pub max_vetoes: u32,
+
+    pub players: Vec<types::Player>,
 
     pub phase: types::Phase,
-    pub players: Vec<types::Player>,
     pub options: Vec<types::Opt>,
-    pub votes_submitted: Vec<String>,
+    pub votes: HashMap<types::PlayerId, Vec<types::OptId>>,
     pub results: Option<Vec<types::VoteResult>>,
-    pub max_vetoes: u32,
-    pub votes: HashMap<String, Vec<String>>,
+    pub kicked_ids: HashSet<types::PlayerId>,
+
     pub host_id: Option<types::PlayerId>,
-    pub kicked_ids: HashSet<String>,
 }
 
 impl Lobby {
@@ -46,8 +49,8 @@ impl Lobby {
         let id = types::LobbyId::rand();
         let name = generate_name();
 
-        let (tx, _rx) = broadcast::channel::<String>(64);
-        Self(Arc::new(Mutex::new(Inner {
+        let (tx, _rx) = broadcast::channel::<types::Outgoing>(64);
+        Self {
             id,
             name,
             public,
@@ -58,21 +61,78 @@ impl Lobby {
             phase: types::Phase::Lobby,
             players: Vec::new(),
             options: Vec::new(),
-            votes_submitted: Vec::new(),
             results: None,
             max_vetoes: 1,
             votes: HashMap::new(),
             host_id: None,
             kicked_ids: HashSet::new(),
-        })))
+        }
     }
 
-    pub fn join(&mut self, info: &types::JoinInfo) -> JoinOutcome {
-        self.0.lock().unwrap().join(info)
+    fn eligible_options(&self) -> impl Iterator<Item = &types::Opt> {
+        self.options.iter().filter(|g| g.vetoed_by.is_none())
+    }
+
+    fn compute_results(&mut self) {
+        let eligible_games: Vec<&types::Opt> = self.eligible_options().collect();
+
+        let n = eligible_games.len();
+        let eligible_ids: Vec<types::OptId> = eligible_games.iter().map(|g| g.id.clone()).collect();
+
+        let mut scores: HashMap<types::OptId, u32> =
+            eligible_ids.iter().map(|id| (id.clone(), 0u32)).collect();
+
+        for ranking in self.votes.values() {
+            let filtered: Vec<&types::OptId> = ranking
+                .iter()
+                .filter(|gid| eligible_ids.contains(gid))
+                .collect();
+
+            for (pos, id) in filtered.iter().enumerate() {
+                let points = (n - pos) as u32;
+                *scores.entry((*id).clone()).or_insert(0) += points;
+            }
+        }
+
+        let mut score_vec: Vec<(types::OptId, u32)> = scores.into_iter().collect();
+        score_vec.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let mut results: Vec<types::VoteResult> = Vec::new();
+        let mut current_rank = 1;
+        for (i, (game_id, score)) in score_vec.into_iter().enumerate() {
+            // Same score as previous entry gets the same rank
+            if i > 0 {
+                if let Some(prev) = results.last() {
+                    if score < prev.score {
+                        current_rank = i + 1;
+                    }
+                }
+            }
+            let game_name = self
+                .options
+                .iter()
+                .find(|g| g.id == game_id)
+                .map(|g| g.name.clone())
+                .unwrap_or_default();
+            results.push(types::VoteResult {
+                game_id,
+                game_name,
+                score,
+                rank: current_rank,
+            });
+        }
+
+        self.results = Some(results);
+    }
+
+    pub fn is_host(&self, player_id: &types::PlayerId) -> bool {
+        self.host_id
+            .as_ref()
+            .map_or(false, |host| host == player_id)
     }
 }
 
-impl Inner {
+impl Lobby {
     pub fn join(&mut self, info: &types::JoinInfo) -> JoinOutcome {
         let types::JoinInfo {
             player_id,
@@ -187,165 +247,51 @@ impl Inner {
 
         Some(outcome)
     }
-}
 
-impl Inner {
-    // pub fn has_connected_players(&self) -> bool {
-    //     self.players.iter().any(|p| p.is_connected())
-    // }
+    pub fn set_name(&mut self, player_id: &types::PlayerId, mut name: String) -> bool {
+        trim_in_place(&mut name);
+        if name.is_empty() {
+            return false;
+        }
 
-    // pub fn set_max_vetoes(&mut self, count: u32) {
-    //     self.max_vetoes = count.max(1).min(20);
-    // }
+        let found = self.players.iter_mut().find(|p| &p.id == player_id);
+        if let Some(player) = found {
+            player.name = name;
+            true
+        } else {
+            false
+        }
+    }
 
-    // pub fn remove_player(&mut self, id: &str) {
-    //     if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
-    //         player.connection_status = types::ConnectionStatus::Disconnected(20);
-    //     }
-    // }
-
-    // pub fn kick_player(&mut self, target_id: &str) {
-    //     self.players.retain(|p| p.id != target_id);
-    //     self.kicked_ids.insert(target_id.to_string());
-    //     // Clean up any votes, vetoes, and games from the kicked player
-    //     self.votes.remove(target_id);
-    //     self.votes_submitted.retain(|id| id != target_id);
-    //     self.options.retain(|g| g.suggested_by != target_id);
-    //     for game in self.options.iter_mut() {
-    //         game.vetoed_by.retain(|id| id != target_id);
-    //     }
-    // }
-
-    // pub fn is_kicked(&self, player_id: &str) -> bool {
-    //     self.kicked_ids.contains(player_id)
-    // }
-
-    // pub fn get_host_id(&self) -> Option<&str> {
-    //     self.host_id.as_deref()
-    // }
-
-    // pub fn has_eligible_games(&self) -> bool {
-    //     self.options.iter().any(|g| g.vetoed_by.is_empty())
-    // }
-
-    // pub fn advance_phase(&mut self) {
-    //     use types::Phase;
-    //     // Don't advance from Vetoing to Voting if all games are vetoed
-    //     if self.phase == Phase::Vetoing && !self.has_eligible_games() {
-    //         return;
-    //     }
-    //
-    //     self.phase = match self.phase {
-    //         Phase::Lobby => Phase::Adding,
-    //         Phase::Adding => Phase::Vetoing,
-    //         Phase::Vetoing => Phase::Voting,
-    //         Phase::Voting => {
-    //             self.compute_results();
-    //             Phase::Results
-    //         }
-    //         Phase::Results => Phase::Results,
-    //     };
-    //
-    //     if self.phase == Phase::Vetoing || self.phase == Phase::Voting {
-    //         // Reset ready flags when entering Vetoing or Voting
-    //         for player in self.players.iter_mut() {
-    //             player.ready = false;
-    //         }
-    //     }
-    //     if self.phase == Phase::Voting {
-    //         self.votes_submitted.clear();
-    //     }
-    // }
-
-    // fn compute_results(&mut self) {
-    //     let eligible_games: Vec<&types::Opt> = self
-    //         .options
-    //         .iter()
-    //         .filter(|g| g.vetoed_by.is_empty())
-    //         .collect();
-    //
-    //     let n = eligible_games.len();
-    //     let eligible_ids: Vec<String> = eligible_games.iter().map(|g| g.id.clone()).collect();
-    //
-    //     let mut scores: HashMap<String, u32> =
-    //         eligible_ids.iter().map(|id| (id.clone(), 0u32)).collect();
-    //
-    //     for ranking in self.votes.values() {
-    //         // Only count positions for eligible games
-    //         let filtered: Vec<&String> = ranking
-    //             .iter()
-    //             .filter(|gid| eligible_ids.contains(gid))
-    //             .collect();
-    //
-    //         for (pos, game_id) in filtered.iter().enumerate() {
-    //             let points = (n - pos) as u32;
-    //             *scores.entry((*game_id).clone()).or_insert(0) += points;
-    //         }
-    //     }
-    //
-    //     let mut score_vec: Vec<(String, u32)> = scores.into_iter().collect();
-    //     score_vec.sort_by(|a, b| b.1.cmp(&a.1));
-    //
-    //     let mut results: Vec<types::VoteResult> = Vec::new();
-    //     let mut current_rank = 1;
-    //     for (i, (game_id, score)) in score_vec.into_iter().enumerate() {
-    //         // Same score as previous entry gets the same rank
-    //         if i > 0 {
-    //             if let Some(prev) = results.last() {
-    //                 if score < prev.score {
-    //                     current_rank = i + 1;
-    //                 }
-    //             }
-    //         }
-    //         let game_name = self
-    //             .options
-    //             .iter()
-    //             .find(|g| g.id == game_id)
-    //             .map(|g| g.name.clone())
-    //             .unwrap_or_default();
-    //         results.push(types::VoteResult {
-    //             game_id,
-    //             game_name,
-    //             score,
-    //             rank: current_rank,
-    //         });
-    //     }
-    //
-    //     self.results = Some(results);
-    // }
-
-    // pub fn set_ready(&mut self, player_id: &str, ready: bool) {
-    //     if let Some(player) = self.players.iter_mut().find(|p| p.id == player_id) {
-    //         player.ready = ready;
-    //     }
-    // }
-
-    pub fn add_game(&mut self, player_id: &str, name: &str) -> bool {
+    pub fn add_game(&mut self, player_id: &types::PlayerId, mut name: String) -> bool {
         if self.phase != types::Phase::Adding {
             return false;
         }
-        if name.trim().is_empty() {
+        trim_in_place(&mut name);
+        if name.is_empty() {
             return false;
         }
-        let id = uuid::Uuid::new_v4().to_string();
+
         self.options.push(types::Opt {
-            id,
+            id: types::OptId::rand(),
             name: name.to_string(),
-            suggested_by: player_id.to_string(),
+            suggested_by: player_id.clone(),
             vetoed_by: None,
         });
+
         true
     }
 
-    pub fn remove_game(&mut self, player_id: &str, game_id: &str) -> bool {
+    pub fn remove_game(&mut self, player_id: &types::PlayerId, choice_id: &types::OptId) -> bool {
         if self.phase != types::Phase::Adding {
             return false;
         }
-        if let Some(pos) = self
+        let opt = self
             .options
             .iter()
-            .position(|g| g.id == game_id && g.suggested_by == player_id)
-        {
+            .position(|opt| &opt.id == choice_id && &opt.suggested_by == player_id);
+
+        if let Some(pos) = opt {
             self.options.remove(pos);
             true
         } else {
@@ -353,60 +299,153 @@ impl Inner {
         }
     }
 
-    // pub fn veto_game(&mut self, player_id: &str, game_id: &str) {
-    //     let used = self
-    //         .options
-    //         .iter()
-    //         .filter(|g| g.vetoed_by.is_some_and(|id| id == player_id))
-    //         .count() as u32;
-    //     if used >= self.max_vetoes {
-    //         return;
-    //     }
-    //     if let Some(game) = self.options.iter_mut().find(|g| g.id == game_id) {
-    //         if !game.vetoed_by.contains(&player_id.to_string()) {
-    //             game.vetoed_by.push(player_id.to_string());
-    //         }
-    //     }
-    // }
-    //
-    // pub fn unveto_game(&mut self, player_id: &str, game_id: &str) {
-    //     if let Some(game) = self.options.iter_mut().find(|g| g.id == game_id) {
-    //         game.vetoed_by.retain(|id| id != player_id);
-    //     }
-    // }
+    pub fn veto_game(&mut self, player_id: &types::PlayerId, game_id: &types::OptId) -> bool {
+        if self.phase != types::Phase::Vetoing {
+            return false;
+        }
 
-    // pub fn submit_vote(&mut self, player_id: &str, ranking: Vec<String>) -> bool {
-    //     if self.phase != Phase::Voting {
-    //         return false;
-    //     }
-    //     self.votes.insert(player_id.to_string(), ranking);
-    //     if !self.votes_submitted.contains(&player_id.to_string()) {
-    //         self.votes_submitted.push(player_id.to_string());
-    //     }
-    //     // Check if all connected players have voted
-    //     let connected_players: Vec<&str> = self
-    //         .players
-    //         .iter()
-    //         .filter(|p| p.is_connected())
-    //         .map(|p| &p.id)
-    //         .collect();
-    //     connected_players
-    //         .iter()
-    //         .all(|id| self.votes_submitted.contains(&id.to_string()))
-    // }
+        let used = self
+            .options
+            .iter()
+            .filter(|g| g.vetoed_by.as_ref().is_some_and(|id| id == player_id))
+            .count() as u32;
 
-    pub fn reset(&mut self) {
-        self.options.clear();
-        self.votes.clear();
-        self.votes_submitted.clear();
-        self.results = None;
-        self.kicked_ids.clear();
-        self.phase = types::Phase::Lobby;
+        if used >= self.max_vetoes {
+            return false;
+        }
+        if let Some(game) = self.options.iter_mut().find(|g| &g.id == game_id) {
+            game.vetoed_by.get_or_insert_with(|| player_id.clone());
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn unveto_game(&mut self, player_id: &types::PlayerId, game_id: &types::OptId) -> bool {
+        if self.phase != types::Phase::Vetoing {
+            return false;
+        }
+
+        self.options
+            .iter_mut()
+            .find(|g| &g.id == game_id)
+            .map_or(false, |opt| {
+                opt.vetoed_by.take_if(|opt| opt == player_id).is_some()
+            })
+    }
+
+    pub fn submit_vote(&mut self, player_id: &types::PlayerId, ranking: Vec<types::OptId>) -> bool {
+        if self.phase != types::Phase::Voting {
+            return false;
+        }
+        self.votes.insert(player_id.clone(), ranking);
+
+        self.players
+            .iter()
+            // .filter(|p| p.is_connected())
+            .all(|player| self.votes.contains_key(&player.id))
+    }
+
+    pub fn set_ready(&mut self, player_id: &types::PlayerId, ready: bool) -> bool {
+        let player = self.players.iter_mut().find(|p| &p.id == player_id);
+
+        if let Some(player) = player {
+            player.ready = ready;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn advance_phase(&mut self) {
+        use types::Phase;
+
+        self.phase = match self.phase {
+            Phase::Lobby => Phase::Adding,
+            Phase::Adding => {
+                if self.eligible_options().next().is_none() {
+                    return;
+                }
+                Phase::Vetoing
+            }
+            Phase::Vetoing => Phase::Voting,
+            Phase::Voting => {
+                self.compute_results();
+
+                Phase::Results
+            }
+            Phase::Results => Phase::Results,
+        };
+
+        self.unready_players()
+    }
+
+    fn unready_players(&mut self) {
         for player in self.players.iter_mut() {
             player.ready = false;
         }
     }
+
+    pub fn reset(&mut self) {
+        self.options.clear();
+        self.votes.clear();
+        self.results = None;
+        self.kicked_ids.clear();
+        self.phase = types::Phase::Lobby;
+
+        self.unready_players();
+    }
+
+    pub fn set_max_vetoes(&mut self, count: u32) {
+        self.max_vetoes = count.max(1).min(32);
+    }
+
+    pub fn kick_player(&mut self, target_id: &types::PlayerId) {
+        self.players.retain(|p| &p.id != target_id);
+        self.kicked_ids.insert(target_id.clone());
+        self.votes.remove(target_id);
+        self.options.retain(|g| &g.suggested_by != target_id);
+        for game in self.options.iter_mut() {
+            game.vetoed_by.take_if(|id| id == target_id);
+        }
+    }
+
+    pub fn set_lobby_public(&mut self, player_id: &types::PlayerId, public: bool) {
+        if self.is_host(player_id) {
+            self.public = public;
+        }
+    }
+
+    pub fn set_lobby_password(&mut self, player_id: &types::PlayerId, password: Option<String>) {
+        if self.is_host(player_id) {
+            self.password = password;
+        }
+    }
+
+    pub fn set_lobby_locked(&mut self, player_id: &types::PlayerId, locked: bool) {
+        if self.is_host(player_id) {
+            self.locked = locked;
+        }
+    }
+
+    pub fn close(&mut self, player_id: &types::PlayerId) -> bool {
+        if self.is_host(player_id) {
+            self.tx
+                .send(types::Outgoing::LobbyClosed(types::LobbyClosed {}))
+                .is_ok()
+        } else {
+            false
+        }
+    }
 }
+
+// impl Inner {
+//     // pub fn has_connected_players(&self) -> bool {
+//     //     self.players.iter().any(|p| p.is_connected())
+//     // }
+//     // pub fn is_kicked(&self, player_id: &str) -> bool {
+//     //     self.kicked_ids.contains(player_id)
+// }
 
 fn generate_name() -> String {
     use rand::RngExt;
@@ -441,4 +480,12 @@ fn generate_name() -> String {
     let adj = ADJECTIVES[rng.random_range(0..ADJECTIVES.len())];
     let noun = NOUNS[rng.random_range(0..NOUNS.len())];
     format!("{} {}", adj, noun)
+}
+
+fn trim_in_place(s: &mut String) {
+    let trimmed = s.trim();
+    let start = trimmed.as_ptr() as usize - s.as_ptr() as usize;
+    let len = trimmed.len();
+    s.truncate(start + len);
+    s.drain(..start);
 }
