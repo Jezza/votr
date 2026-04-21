@@ -17,10 +17,6 @@ pub enum JoinOutcome {
 
 pub const MAX_PLAYERS: usize = 8;
 
-// #[derive(Clone)]
-// pub struct Lobby(Arc<Mutex<Inner>>);
-
-// #[derive(Debug, Clone)]
 pub struct Lobby {
     pub id: types::LobbyId,
     pub tx: broadcast::Sender<types::Outgoing>,
@@ -209,11 +205,54 @@ impl Lobby {
             self.host_id = Some(player_id.clone());
         }
 
+        self.send_state();
+
         outcome
+    }
+
+    pub fn send_state(&self) {
+        let Self {
+            tx: _,
+            last_empty: _,
+            votes: _,
+            kicked_ids: _,
+            id,
+            name,
+            public,
+            password,
+            locked,
+            max_vetoes,
+            players,
+            phase,
+            options,
+            results,
+            host_id,
+        } = self;
+
+        let state = types::LobbyState {
+            phase: *phase,
+            players: players.clone(),
+            games: options.clone(),
+            results: results.clone(),
+            host_id: host_id.clone(),
+            max_vetoes: *max_vetoes,
+            lobby_id: *id,
+            lobby_name: name.clone(),
+            lobby_public: *public,
+            lobby_locked: *locked,
+            lobby_has_password: password.is_some(),
+        };
+
+        let _ = self.tx.send(types::Outgoing::LobbyState(state)).ok();
     }
 
     /// Try to reconnect a previously-seen player.
     pub fn rejoin(&mut self, id: &types::PlayerId, name: &str) -> Option<JoinOutcome> {
+        if self.kicked_ids.contains(id) {
+            // Return early here, as we're just getting rid of them..
+            return Some(JoinOutcome::Kicked);
+        }
+
         let Some(player) = self.players.iter_mut().find(|p| &p.id == id) else {
             // No existing player found, so must be a new one.
             return None;
@@ -227,10 +266,6 @@ impl Lobby {
                 // Someone is already here?
                 // It's possible that they just opened it up in a new tab...
                 JoinOutcome::Joined(rx, true)
-            }
-            types::ConnectionStatus::Kicked => {
-                // Return early here, as we're just getting rid of them..
-                return Some(JoinOutcome::Kicked);
             }
             types::ConnectionStatus::Disconnected(_) => {
                 let rx = self.tx.subscribe();
@@ -249,7 +284,7 @@ impl Lobby {
     }
 
     pub fn set_name(&mut self, player_id: &types::PlayerId, mut name: String) -> bool {
-        trim_in_place(&mut name);
+        crate::trim_in_place(&mut name);
         if name.is_empty() {
             return false;
         }
@@ -267,7 +302,7 @@ impl Lobby {
         if self.phase != types::Phase::Adding {
             return false;
         }
-        trim_in_place(&mut name);
+        crate::trim_in_place(&mut name);
         if name.is_empty() {
             return false;
         }
@@ -340,6 +375,8 @@ impl Lobby {
         }
         self.votes.insert(player_id.clone(), ranking);
 
+        self.set_ready(player_id, true);
+
         self.players
             .iter()
             // .filter(|p| p.is_connected())
@@ -400,14 +437,10 @@ impl Lobby {
         self.max_vetoes = count.max(1).min(32);
     }
 
-    pub fn kick_player(&mut self, target_id: &types::PlayerId) {
-        self.players.retain(|p| &p.id != target_id);
-        self.kicked_ids.insert(target_id.clone());
-        self.votes.remove(target_id);
-        self.options.retain(|g| &g.suggested_by != target_id);
-        for game in self.options.iter_mut() {
-            game.vetoed_by.take_if(|id| id == target_id);
-        }
+    pub fn kick_player(&mut self, player_id: &types::PlayerId) {
+        self.remove_player(player_id);
+
+        self.kicked_ids.insert(player_id.clone());
     }
 
     pub fn set_lobby_public(&mut self, player_id: &types::PlayerId, public: bool) {
@@ -437,15 +470,54 @@ impl Lobby {
             false
         }
     }
-}
 
-// impl Inner {
-//     // pub fn has_connected_players(&self) -> bool {
-//     //     self.players.iter().any(|p| p.is_connected())
-//     // }
-//     // pub fn is_kicked(&self, player_id: &str) -> bool {
-//     //     self.kicked_ids.contains(player_id)
-// }
+    pub fn disconnect_player(&mut self, player_id: &types::PlayerId) {
+        let found = self.players.iter_mut().find(|p| &p.id == player_id);
+
+        if let Some(player) = found {
+            player.connection_status = types::ConnectionStatus::Disconnected(20);
+        }
+
+        let has_players = self.players.iter().any(|p| p.is_connected());
+        if !has_players {
+            self.last_empty = Some(Instant::now());
+        }
+
+        if self.is_host(player_id) {
+            // Pick someone else, if there is anyone else.
+            self.host_id = self
+                .players
+                .iter()
+                .skip_while(|p| &p.id == player_id)
+                .next()
+                .map(|lucky| lucky.id.clone());
+        }
+    }
+
+    pub fn remove_player(&mut self, player_id: &types::PlayerId) {
+        self.players.retain(|p| &p.id != player_id);
+        self.votes.remove(player_id);
+        self.options.retain(|g| &g.suggested_by != player_id);
+        for opt in self.options.iter_mut() {
+            opt.vetoed_by.take_if(|id| id == player_id);
+        }
+
+        let has_players = self.players.iter().any(|p| p.is_connected());
+        if !has_players {
+            self.last_empty = Some(Instant::now());
+        }
+
+        if self.is_host(player_id) {
+            // Pick someone else, if there is anyone else.
+            self.host_id = self
+                .players
+                .iter()
+                .skip_while(|p| &p.id == player_id)
+                .next()
+                .map(|lucky| lucky.id.clone());
+        }
+    }
+}
 
 fn generate_name() -> String {
     use rand::RngExt;
@@ -480,12 +552,4 @@ fn generate_name() -> String {
     let adj = ADJECTIVES[rng.random_range(0..ADJECTIVES.len())];
     let noun = NOUNS[rng.random_range(0..NOUNS.len())];
     format!("{} {}", adj, noun)
-}
-
-fn trim_in_place(s: &mut String) {
-    let trimmed = s.trim();
-    let start = trimmed.as_ptr() as usize - s.as_ptr() as usize;
-    let len = trimmed.len();
-    s.truncate(start + len);
-    s.drain(..start);
 }

@@ -87,11 +87,9 @@ const AppInner = React.memo(() => {
 
 	const navigateToLobby = useCallback((id: string, password?: string) => {
 		disconnect();
-		// suppressReconnect.current = false;
 		hasReceivedState.current = false;
 		setKicked(false);
 		setState(null);
-		// setMyId(null);
 		setLobbyId(id);
 		setLobbyPassword(password);
 		window.history.pushState(null, "", `${apiBase}/?lobby=${id}`);
@@ -171,52 +169,55 @@ const AppInner = React.memo(() => {
 
 			console.log(incoming);
 
-			// if (msg.type === "welcome") {
-			// 	setKicked(false);
-			// 	setMyId(msg.player_id);
-			// 	// setPlayerId(msg.lobby_id, msg.player_id);
-			// } else if (msg.type === "state") {
-			// 	const {type: _type, ...serverState} = msg;
-			// 	const newState = serverState as ServerState;
-			//
-			// 	const times = disconnectTimes.current;
-			// 	for (const player of newState.players) {
-			// 		if (player.disconnect_timeout != null && !times.has(player.id)) {
-			// 			times.set(player.id, Date.now());
-			// 		} else if (player.connected) {
-			// 			times.delete(player.id);
-			// 		}
-			// 	}
-			// 	for (const id of times.keys()) {
-			// 		if (!newState.players.some((p) => p.id === id)) {
-			// 			times.delete(id);
-			// 		}
-			// 	}
-			//
-			// 	hasReceivedState.current = true;
-			// 	setState(newState);
-			// } else if (msg.type === "kicked") {
-			// 	setKicked(true);
-			// } else if (msg.type === "toast") {
-			// 	setToast({message: msg.message, level: msg.level});
-			// 	// If we haven't received state yet, the lobby rejected us
-			// 	if (!hasReceivedState.current) {
-			// 		suppressReconnect.current = true;
-			// 		navigateToBrowser(msg.message);
-			// 	}
-			// } else if (msg.type === "lobby_closed") {
-			// 	navigateToBrowser("Lobby was closed");
-			// } else if (msg.type === "error") {
-			// 	console.error("Server error:", msg.message);
-			// }
+			switch (incoming.ty) {
+				case "welcome": {
+					setKicked(false);
+					break;
+				}
+				case "state": {
+					const {ty: _ty, ...state} = incoming;
+					const newState = state as types.ServerState;
 
-			// let msg: ServerMessage;
-			// try {
-			//   msg = JSON.parse(event.data as string) as ServerMessage;
-			// } catch {
-			//   return;
-			// }
+					// const times = disconnectTimes.current;
+					// for (const player of newState.players) {
+					// 	if (player.disconnect_timeout != null && !times.has(player.id)) {
+					// 		times.set(player.id, Date.now());
+					// 	} else if (player.connected) {
+					// 		times.delete(player.id);
+					// 	}
+					// }
+					// for (const id of times.keys()) {
+					// 	if (!newState.players.some((p) => p.id === id)) {
+					// 		times.delete(id);
+					// 	}
+					// }
 
+					hasReceivedState.current = true;
+					setState(newState);
+					break;
+				}
+				case "error": {
+					console.error("Server error:", incoming.message);
+					break;
+				}
+				case "kicked": {
+					setKicked(true);
+					break;
+				}
+				case "lobby_closed": {
+					navigateToBrowser("Lobby was closed");
+					break;
+				}
+				case "toast": {
+					setToast({message: incoming.message, level: incoming.level});
+					// If we haven't received state yet, the lobby rejected us
+					// if (!hasReceivedState.current) {
+					// 	suppressReconnect.current = true;
+					// 	navigateToBrowser(msg.message);
+					// }
+					break;
+				}
+			}
 		};
 	}, [lobbyId, lobbyPassword, navigateToBrowser]);
 

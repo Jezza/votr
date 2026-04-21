@@ -42,19 +42,19 @@ impl AppState {
         lobbies.remove(lobby_id)
     }
 
-    pub fn create_lobby(
-        &mut self,
-        public: bool,
-        password: Option<String>,
-    ) -> Result<(String, String), &'static str> {
-        // if self.lobbies.len() >= MAX_LOBBIES {
-        //     return Err("too many lobbies");
-        // }
-        // let lobby = Lobby::new(public, password);
-        // self.lobbies.insert(id.clone(), Arc::new(Mutex::new(lobby)));
-        // Ok((id, name))
-        Err("test")
-    }
+    // pub fn create_lobby(
+    //     &mut self,
+    //     public: bool,
+    //     password: Option<String>,
+    // ) -> Result<(String, String), &'static str> {
+    //     // if self.lobbies.len() >= MAX_LOBBIES {
+    //     //     return Err("too many lobbies");
+    //     // }
+    //     // let lobby = Lobby::new(public, password);
+    //     // self.lobbies.insert(id.clone(), Arc::new(Mutex::new(lobby)));
+    //     // Ok((id, name))
+    //     // Err("test")
+    // }
 
     // pub fn remove_lobby(&mut self, id: &str) {
     //     self.lobbies.remove(id);
@@ -66,22 +66,7 @@ impl AppState {
 }
 
 // #[derive(Serialize)]
-// struct StateMessage<'a> {
-//     #[serde(rename = "type")]
-//     msg_type: &'static str,
-//     phase: &'a Phase,
-//     players: &'a Vec<Player>,
-//     games: &'a Vec<Opt>,
-//     votes_submitted: &'a Vec<String>,
-//     results: &'a Option<Vec<VoteResult>>,
-//     host_id: Option<&'a str>,
-//     max_vetoes: u32,
-//     lobby_id: &'a str,
-//     lobby_name: &'a str,
-//     lobby_public: bool,
-//     lobby_locked: bool,
-//     lobby_has_password: bool,
-// }
+// struct StateMessage
 //
 // fn serialize_state(lobby: &Lobby) -> String {
 //     let msg = StateMessage {
@@ -105,36 +90,58 @@ impl AppState {
 
 pub async fn handler(
     ws: WebSocketUpgrade,
-    Query(mut params): Query<HashMap<String, String>>,
+    // Query(mut params): Query<HashMap<String, String>>,
+    Query(mut info): Query<types::JoinInfo>,
     State(state): State<AppState>,
 ) -> Response {
-    let Some(player_id) = params.remove("player_id") else {
-        warn!("someone sent a request without a `player_id`");
-        return StatusCode::BAD_REQUEST.into_response();
-    };
-    let Some(name) = params.remove("name") else {
-        warn!("someone sent a request without a `name`");
-        return StatusCode::BAD_REQUEST.into_response();
-    };
-    if name.trim().is_empty() {
+    println!("{:#?}", info);
+
+    // let Some(player_id) = params.remove("player_id") else {
+    //     warn!("someone sent a request without a `player_id`");
+    //     return StatusCode::BAD_REQUEST.into_response();
+    // };
+    // let Some(mut name) = params.remove("name") else {
+    //     warn!("someone sent a request without a `name`");
+    //     return StatusCode::BAD_REQUEST.into_response();
+    // };
+    crate::trim_in_place(&mut info.name);
+    if info.name.is_empty() {
         return StatusCode::BAD_REQUEST.into_response();
     }
+    //
+    // println!("{:#?}", params);
+    //
+    // let Some(lobby_id) = params.remove("lobby_id") else {
+    //     warn!("someone sent a request without a `lobby_id`");
+    //     return StatusCode::BAD_REQUEST.into_response();
+    // };
+    // let password = params.remove("password");
+    //
+    // let player_id = match uuid::Uuid::parse_str(&player_id) {
+    //     Ok(value) => value,
+    //     Err(err) => {
+    //         warn!("someone sent an invalid `player_id` {}", err);
+    //         return StatusCode::BAD_REQUEST.into_response();
+    //     }
+    // };
+    //
+    // let lobby_id = match uuid::Uuid::parse_str(&lobby_id) {
+    //     Ok(value) => value,
+    //     Err(err) => {
+    //         warn!("someone sent an invalid `lobby_id` {}", err);
+    //         return StatusCode::BAD_REQUEST.into_response();
+    //     }
+    // };
 
-    let Some(lobby_id) = params.remove("lobby_id") else {
-        warn!("someone sent a request without a `lobby_id`");
-        return StatusCode::BAD_REQUEST.into_response();
-    };
-    let password = params.remove("password");
-
-    let info = types::JoinInfo {
-        player_id: types::PlayerId(player_id),
-        name,
-        lobby_id: types::LobbyId(lobby_id),
-        password,
-    };
+    // let info = types::JoinInfo {
+    //     player_id: types::PlayerId(player_id),
+    //     name,
+    //     lobby_id: types::LobbyId(lobby_id),
+    //     password,
+    // };
 
     let Some(lobby) = state.find_lobby(&info.lobby_id).await else {
-        warn!("someone sent a request without a `lobby_id`");
+        warn!("no lobby found with {}", info.lobby_id);
         return StatusCode::BAD_REQUEST.into_response();
     };
 
@@ -162,7 +169,7 @@ async fn handle_socket(
     socket: WebSocket,
     state: AppState,
     info: types::JoinInfo,
-    mut lobby: Shared<Lobby>,
+    lobby: Shared<Lobby>,
 ) {
     let (mut sender, mut receiver) = socket.split();
 
@@ -171,12 +178,19 @@ async fn handle_socket(
         lobby.join(&info)
     };
 
+    let types::JoinInfo {
+        player_id,
+        name: _,
+        lobby_id,
+        password: _,
+    } = info;
+
     let rx = match outcome {
         JoinOutcome::Joined(rx, _rejoined) => rx,
         JoinOutcome::Locked => {
             info!(
-                player_id = %info.player_id,
-                lobby_id = %info.lobby_id,
+                player_id = %player_id,
+                lobby_id = %lobby_id,
                 "lobby is locked"
             );
             send!(sender, types::Toast::error("Lobby is locked"));
@@ -184,8 +198,8 @@ async fn handle_socket(
         }
         JoinOutcome::Kicked => {
             info!(
-                player_id = %info.player_id,
-                lobby_id = %info.lobby_id,
+                player_id = %player_id,
+                lobby_id = %lobby_id,
                 "played attempt to rejoin after being kicked"
             );
             send!(sender, types::Kicked {});
@@ -193,8 +207,8 @@ async fn handle_socket(
         }
         JoinOutcome::LobbyFull => {
             info!(
-                player_id = %info.player_id,
-                lobby_id = %info.lobby_id,
+                player_id = %player_id,
+                lobby_id = %lobby_id,
                 "lobby is full"
             );
             send!(
@@ -205,8 +219,8 @@ async fn handle_socket(
         }
         JoinOutcome::IncorrectPassword => {
             info!(
-                player_id = %info.player_id,
-                lobby_id = %info.lobby_id,
+                player_id = %player_id,
+                lobby_id = %lobby_id,
                 "incorrect password"
             );
             send!(sender, types::Toast::error("Incorrect password"));
@@ -230,14 +244,16 @@ async fn handle_socket(
 
     let mut rx = rx;
 
-    loop {
+    let closed = loop {
         tokio::select! {
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        handle_message(state.clone(), &mut sender, lobby.clone(), &text, &info).await;
+                        handle_message(state.clone(), &mut sender, lobby.clone(), &text, &player_id).await;
                     }
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Close(_))) | None => {
+                        break false;
+                    },
                     _ => {}
                 }
             }
@@ -247,16 +263,16 @@ async fn handle_socket(
                         let closed = matches!(msg, types::Outgoing::LobbyClosed(_));
 
                         if send!(sender, msg).is_err() {
-                            break;
+                            break false;
                         }
 
                         if closed {
-                            break;
+                            break true;
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         send!(sender, types::LobbyClosed {});
-                        break;
+                        break true;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                         // Skip lagged messages
@@ -264,11 +280,24 @@ async fn handle_socket(
                 }
             }
         }
-    }
+    };
 
     // Player disconnected — mark as disconnected
+
     {
-        
+        let mut lobby = lobby.lock().await;
+        if closed {
+            lobby.remove_player(&player_id)
+        } else {
+            lobby.disconnect_player(&player_id)
+
+
+
+        }
+
+    }
+
+    {
     //     let mut lobby = lobby_arc.lock().await;
     //     lobby.session.remove_player(&player_id);
     //     info!("Player {} disconnected from lobby {}", player_id, lobby_id);
@@ -325,7 +354,7 @@ async fn handle_message(
     sender: &mut SplitSink<WebSocket, Message>,
     lobby: Shared<Lobby>,
     text: &str,
-    info: &types::JoinInfo,
+    player_id: &types::PlayerId,
 ) {
     let value: types::Incoming = match serde_json::from_str(text) {
         Ok(v) => v,
@@ -335,71 +364,57 @@ async fn handle_message(
         }
     };
 
+    let mut lobby = lobby.lock().await;
+
     match value {
         types::Incoming::SetName(msg) => {
-            let player_id = msg.player_id.as_ref().unwrap_or(&info.player_id);
+            let player_id = msg.player_id.as_ref().unwrap_or(&player_id);
 
-            let mut lobby = lobby.lock().await;
             lobby.set_name(&player_id, msg.name);
         }
         types::Incoming::AddGame(msg) => {
-            let mut lobby = lobby.lock().await;
-            lobby.add_game(&info.player_id, msg.name);
+            lobby.add_game(&player_id, msg.name);
         }
         types::Incoming::RemoveGame(msg) => {
-            let mut lobby = lobby.lock().await;
-            lobby.remove_game(&info.player_id, &msg.game_id);
+            lobby.remove_game(&player_id, &msg.game_id);
         }
         types::Incoming::VetoGame(msg) => {
-            let mut lobby = lobby.lock().await;
-            lobby.veto_game(&info.player_id, &msg.game_id);
+            lobby.veto_game(&player_id, &msg.game_id);
         }
         types::Incoming::UnvetoGame(msg) => {
-            let mut lobby = lobby.lock().await;
-            lobby.unveto_game(&info.player_id, &msg.game_id);
+            lobby.unveto_game(&player_id, &msg.game_id);
         }
         types::Incoming::SubmitVote(msg) => {
-            let mut lobby = lobby.lock().await;
-            lobby.submit_vote(&info.player_id, msg.ranking);
+            lobby.submit_vote(&player_id, msg.ranking);
         }
         types::Incoming::SetReady(msg) => {
-            let mut lobby = lobby.lock().await;
-            lobby.set_ready(&info.player_id, msg.ready);
+            lobby.set_ready(&player_id, msg.ready);
         }
         types::Incoming::AdvancePhase => {
-            let mut lobby = lobby.lock().await;
             lobby.advance_phase();
         }
         types::Incoming::ResetSession => {
-            let mut lobby = lobby.lock().await;
             lobby.reset();
         }
         types::Incoming::SetMaxVetoes(msg) => {
-            let mut lobby = lobby.lock().await;
             lobby.set_max_vetoes(msg.count);
         }
         types::Incoming::KickPlayer(msg) => {
-            let mut lobby = lobby.lock().await;
             lobby.kick_player(&msg.target_id);
         }
         types::Incoming::SetLobbyPublic(msg) => {
-            let mut lobby = lobby.lock().await;
-            lobby.set_lobby_public(&info.player_id, msg.public);
+            lobby.set_lobby_public(&player_id, msg.public);
         }
         types::Incoming::SetLobbyPassword(msg) => {
-            let mut lobby = lobby.lock().await;
-            lobby.set_lobby_password(&info.player_id, msg.password);
+            lobby.set_lobby_password(&player_id, msg.password);
         }
         types::Incoming::SetLobbyLocked(msg) => {
-            let mut lobby = lobby.lock().await;
-            lobby.set_lobby_locked(&info.player_id, msg.locked);
+            lobby.set_lobby_locked(&player_id, msg.locked);
         }
         types::Incoming::CloseLobby => {
-            let mut lobby = lobby.lock().await;
-            lobby.close(&info.player_id);
+            lobby.close(&player_id);
         }
     }
 
-    // let state_json = serialize_state(&lobby_guard);
-    // let _ = lobby_guard.tx.send(state_json);
+    lobby.send_state();
 }

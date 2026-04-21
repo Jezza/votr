@@ -1,56 +1,71 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
 #[serde(transparent)]
-pub struct PlayerId(pub String);
+pub struct PlayerId(pub uuid::Uuid);
 
 impl std::fmt::Display for PlayerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("PlayerId(")?;
-        f.write_str(&self.0)?;
+        self.0.fmt(f)?;
         f.write_str(")")
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
 #[serde(transparent)]
-pub struct LobbyId(pub String);
+pub struct LobbyId(pub uuid::Uuid);
 
 impl LobbyId {
     pub fn rand() -> Self {
-        let id = uuid::Uuid::new_v4().to_string();
-        Self(id)
+        Self(uuid::Uuid::new_v4())
     }
 }
 
 impl std::fmt::Display for LobbyId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("LobbyId(")?;
-        f.write_str(&self.0)?;
+        self.0.fmt(f)?;
         f.write_str(")")
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Hash)]
 #[serde(transparent)]
-pub struct OptId(pub String);
+pub struct OptId(uuid::Uuid);
 
 impl OptId {
     pub fn rand() -> Self {
-        let id = uuid::Uuid::new_v4().to_string();
-        Self(id)
+        Self(uuid::Uuid::new_v4())
     }
 }
 
 impl std::fmt::Display for OptId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("OptId(")?;
-        f.write_str(&self.0)?;
+        self.0.fmt(f)?;
         f.write_str(")")
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Serialize)]
+pub struct LobbyInfo {
+    pub id: LobbyId,
+    pub name: String,
+    pub player_count: usize,
+    pub max_players: usize,
+    pub has_password: bool,
+    pub locked: bool,
+    pub phase: Phase,
+}
+
+#[derive(Deserialize)]
+pub struct CreateLobbyRequest {
+    pub public: Option<bool>,
+    pub password: Option<String>,
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
     Lobby,
@@ -60,25 +75,12 @@ pub enum Phase {
     Results,
 }
 
-// #[derive(Serialize)]
-// pub struct LobbyInfo {
-//     pub id: String,
-//     pub name: String,
-//     pub player_count: usize,
-//     pub max_players: usize,
-//     pub has_password: bool,
-//     pub locked: bool,
-//     pub phase: String,
-// }
-
 #[derive(Debug, Clone, Serialize)]
 pub struct Player {
     pub id: PlayerId,
     pub name: String,
     pub connection_status: ConnectionStatus,
     pub ready: bool,
-    // pub connected: bool,
-    // pub disconnect_timeout: Option<u32>,
 }
 
 impl Player {
@@ -88,9 +90,9 @@ impl Player {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(tag = "ty", rename_all = "snake_case")]
 pub enum ConnectionStatus {
     Connected,
-    // Kicked,
     /// Seconds remaining before this player is removed (None if connected)
     Disconnected(u32),
 }
@@ -111,7 +113,7 @@ pub struct VoteResult {
     pub rank: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "ty", rename_all = "snake_case")]
 pub enum Outgoing {
     Welcome(Welcome),
@@ -119,6 +121,8 @@ pub enum Outgoing {
     Kicked(Kicked),
     Toast(Toast),
     LobbyClosed(LobbyClosed),
+    #[serde(rename = "state")]
+    LobbyState(LobbyState),
 }
 
 impl From<Welcome> for Outgoing {
@@ -151,6 +155,12 @@ impl From<Kicked> for Outgoing {
     }
 }
 
+impl From<LobbyState> for Outgoing {
+    fn from(value: LobbyState) -> Self {
+        Self::LobbyState(value)
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "ty", rename_all = "snake_case")]
 pub enum Incoming {
@@ -169,6 +179,21 @@ pub enum Incoming {
     SetLobbyPassword(SetLobbyPassword),
     SetLobbyLocked(SetLobbyLocked),
     CloseLobby,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LobbyState {
+    pub phase: Phase,
+    pub players: Vec<Player>,
+    pub games: Vec<Opt>,
+    pub results: Option<Vec<VoteResult>>,
+    pub host_id: Option<PlayerId>,
+    pub max_vetoes: u32,
+    pub lobby_id: LobbyId,
+    pub lobby_name: String,
+    pub lobby_public: bool,
+    pub lobby_locked: bool,
+    pub lobby_has_password: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -292,6 +317,7 @@ pub struct SetLobbyLocked {
     pub locked: bool,
 }
 
+#[derive(Debug, Deserialize)]
 pub struct JoinInfo {
     pub player_id: PlayerId,
     pub name: String,

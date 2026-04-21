@@ -8,18 +8,12 @@ use tracing::info;
 use ws::{AppState, handler};
 
 mod lobby;
-mod ws;
 mod types;
+mod ws;
 
 #[derive(rust_embed::RustEmbed, Clone, Copy)]
 #[folder = "../../ui/dist"]
 pub struct Assets;
-
-#[derive(Deserialize)]
-struct CreateLobbyRequest {
-    public: Option<bool>,
-    password: Option<String>,
-}
 
 #[tokio::main]
 async fn main() {
@@ -81,36 +75,63 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn list_lobbies(State(state): State<AppState>) -> Json<Vec<lobby::LobbyInfo>> {
-    let manager = state.lobbies.lock().await;
-    let mut lobbies = Vec::new();
-    for lobby_arc in manager.lobbies.values() {
-        let Ok(lobby) = lobby_arc.try_lock() else {
-            continue;
-        };
+async fn list_lobbies(State(state): State<AppState>) -> Json<Vec<types::LobbyInfo>> {
+    let lobbies: Vec<_> = {
+        let lobbies = state.lobbies.lock().await;
+        lobbies.values().cloned().collect()
+    };
 
-        if !lobby.public {
-            continue;
-        }
+    let mut info = vec![];
 
-        let player_count = lobby
-            .session
-            .players
-            .iter()
-            .filter(|p| p.is_connected())
-            .count();
+    for lobby in lobbies {
+        let lobby = lobby.lock().await;
 
-        lobbies.push(lobby::LobbyInfo {
-            id: lobby.id.clone(),
+        info.push(types::LobbyInfo {
+            id: lobby.id,
             name: lobby.name.clone(),
-            player_count,
-            max_players: session::MAX_PLAYERS,
+            player_count: lobby.players.len(),
+            max_players: lobby::MAX_PLAYERS,
             has_password: lobby.password.is_some(),
             locked: lobby.locked,
-            phase: format!("{:?}", lobby.session.phase).to_lowercase(),
+            phase: lobby.phase,
         });
     }
-    Json(lobbies)
+    Json(info)
 }
 
+async fn create_lobby(
+    State(state): State<AppState>,
+    Json(req): Json<types::CreateLobbyRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let public = req.public.unwrap_or(true);
+    let password = match req.password {
+        Some(pw) if pw.len() > 64 => {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        Some(pw) if pw.is_empty() => {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        pw => pw,
+    };
 
+    let id = types::LobbyId::rand();
+    let lobby = lobby::Lobby::new(public, password);
+
+    // @TODO jezza - 21 Apr 2026: Replace this with a real type
+    let response = serde_json::json!({ "id": id, "name": lobby.name });
+
+    {
+        let mut lobbies = state.lobbies.lock().await;
+        lobbies.insert(id, Arc::new(Mutex::new(lobby)));
+    }
+
+    Ok(Json(response))
+}
+
+fn trim_in_place(s: &mut String) {
+    let trimmed = s.trim();
+    let start = trimmed.as_ptr() as usize - s.as_ptr() as usize;
+    let len = trimmed.len();
+    s.truncate(start + len);
+    s.drain(..start);
+}
