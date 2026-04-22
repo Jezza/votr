@@ -85,16 +85,34 @@ pub struct Player {
 
 impl Player {
     pub fn is_connected(&self) -> bool {
-        matches!(self.connection_status, ConnectionStatus::Connected)
+        matches!(self.connection_status, ConnectionStatus::Connected(_))
     }
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "ty", rename_all = "snake_case")]
 pub enum ConnectionStatus {
-    Connected,
+    Connected(Connected),
     /// Seconds remaining before this player is removed (None if connected)
-    Disconnected(u32),
+    Disconnected(Disconnected),
+}
+
+impl ConnectionStatus {
+    pub fn connected() -> Self {
+        Self::Connected(Connected {})
+    }
+
+    pub fn disconnected(timeout: u32) -> Self {
+        Self::Disconnected(Disconnected { timeout })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Connected {}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Disconnected {
+    timeout: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -257,8 +275,6 @@ impl Toast {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SetName {
-    #[serde(default)]
-    pub player_id: Option<PlayerId>,
     pub name: String,
 }
 

@@ -1,16 +1,19 @@
+export type ConnectionStatus =
+	| { ty: "connected" }
+	| { ty: "disconnected"; timeout: number };
+
 export interface Player {
 	id: string;
 	name: string;
-	connected: boolean;
+	connection_status: ConnectionStatus;
 	ready: boolean;
-	disconnect_timeout: number | null;
 }
 
 export interface Game {
 	id: string;
 	name: string;
 	suggested_by: string;
-	vetoed_by: string[];
+	vetoed_by: string | null;
 }
 
 export interface ResultEntry {
@@ -26,7 +29,6 @@ export interface ServerState {
 	phase: Phase;
 	players: Player[];
 	games: Game[];
-	votes_submitted: string[];
 	results: ResultEntry[] | null;
 	host_id: string | null;
 	max_vetoes: number;
@@ -99,5 +101,4 @@ export interface PhaseProps {
 	isHost: boolean;
 	send: (msg: Outgoing) => void;
 	myPlayer: Player | undefined;
-	getCountdown: (playerId: string, timeout: number) => number;
 }

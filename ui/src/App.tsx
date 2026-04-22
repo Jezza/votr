@@ -50,8 +50,6 @@ const AppInner = React.memo(() => {
 	const [kicked, setKicked] = useState(false);
 	const [toast, setToast] = useState<{ message: string; level: "info" | "error" | "warning" } | null>(null);
 	const hasReceivedState = useRef(false);
-	const disconnectTimes = useRef<Map<string, number>>(new Map());
-	const [, setTick] = useState(0);
 
 	const {playerId, playerName, setPlayerName} = useApp(store => ({
 		playerId: store.playerId,
@@ -178,20 +176,6 @@ const AppInner = React.memo(() => {
 					const {ty: _ty, ...state} = incoming;
 					const newState = state as types.ServerState;
 
-					// const times = disconnectTimes.current;
-					// for (const player of newState.players) {
-					// 	if (player.disconnect_timeout != null && !times.has(player.id)) {
-					// 		times.set(player.id, Date.now());
-					// 	} else if (player.connected) {
-					// 		times.delete(player.id);
-					// 	}
-					// }
-					// for (const id of times.keys()) {
-					// 	if (!newState.players.some((p) => p.id === id)) {
-					// 		times.delete(id);
-					// 	}
-					// }
-
 					hasReceivedState.current = true;
 					setState(newState);
 					break;
@@ -262,21 +246,6 @@ const AppInner = React.memo(() => {
 		return () => window.removeEventListener("popstate", handlePopState);
 	}, [lobbyId, navigateToLobby, navigateToBrowser]);
 
-	const hasDisconnected = state?.players.some((p) => p.disconnect_timeout != null) ?? false;
-
-	useEffect(() => {
-		if (!hasDisconnected) return;
-		const interval = setInterval(() => setTick((t) => t + 1), 1000);
-		return () => clearInterval(interval);
-	}, [hasDisconnected]);
-
-	const getCountdown = (playerId: string, timeout: number): number => {
-		const disconnectedAt = disconnectTimes.current.get(playerId);
-		if (!disconnectedAt) return timeout;
-		const elapsed = Math.floor((Date.now() - disconnectedAt) / 1000);
-		return Math.max(0, timeout - elapsed);
-	};
-
 	const myPlayer: types.Player | undefined = state?.players.find((p) => p.id === playerId);
 	const isHost = playerId !== null && state?.host_id === playerId;
 	// const displayName = myPlayer?.name ?? playerName ?? "…";
@@ -333,7 +302,7 @@ const AppInner = React.memo(() => {
 			);
 		}
 
-		const props = {state, myId: playerId, isHost, send, myPlayer, getCountdown};
+		const props = {state, myId: playerId, isHost, send, myPlayer};
 
 		switch (state.phase) {
 			case "lobby":

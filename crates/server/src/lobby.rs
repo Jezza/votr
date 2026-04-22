@@ -192,7 +192,7 @@ impl Lobby {
         self.players.push(types::Player {
             id: player_id.clone(),
             name: String::from(name),
-            connection_status: types::ConnectionStatus::Connected,
+            connection_status: types::ConnectionStatus::connected(),
             ready: false,
         });
 
@@ -261,7 +261,7 @@ impl Lobby {
         player.name = String::from(name);
 
         let outcome = match player.connection_status {
-            types::ConnectionStatus::Connected => {
+            types::ConnectionStatus::Connected(_) => {
                 let rx = self.tx.subscribe();
                 // Someone is already here?
                 // It's possible that they just opened it up in a new tab...
@@ -270,7 +270,7 @@ impl Lobby {
             types::ConnectionStatus::Disconnected(_) => {
                 let rx = self.tx.subscribe();
                 // Reconnect the player to existing slot.
-                player.connection_status = types::ConnectionStatus::Connected;
+                player.connection_status = types::ConnectionStatus::connected();
                 JoinOutcome::Joined(rx, true)
             }
         };
@@ -279,6 +279,8 @@ impl Lobby {
         if self.host_id.is_none() {
             self.host_id = Some(id.clone());
         }
+
+        self.send_state();
 
         Some(outcome)
     }
@@ -475,7 +477,7 @@ impl Lobby {
         let found = self.players.iter_mut().find(|p| &p.id == player_id);
 
         if let Some(player) = found {
-            player.connection_status = types::ConnectionStatus::Disconnected(20);
+            player.connection_status = types::ConnectionStatus::disconnected(20);
         }
 
         let has_players = self.players.iter().any(|p| p.is_connected());

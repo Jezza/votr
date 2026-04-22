@@ -6,7 +6,7 @@ function playerName(players: PhaseProps["state"]["players"], id: string): string
 }
 
 function eligibleGames(games: Game[]): Game[] {
-  return games.filter((g) => g.vetoed_by.length === 0);
+  return games.filter((g) => g.vetoed_by === null);
 }
 
 interface DragState {
@@ -14,7 +14,7 @@ interface DragState {
   toIndex: number;
 }
 
-export function VotingPhase({ state, myId, isHost, send }: PhaseProps) {
+export function VotingPhase({ state, myId, isHost, send, myPlayer }: PhaseProps) {
   const eligible = eligibleGames(state.games);
   const eligibleKey = eligible.map((g) => g.id).join(",");
   const [ranking, setRanking] = useState<string[]>(() => eligible.map((g) => g.id));
@@ -30,7 +30,7 @@ export function VotingPhase({ state, myId, isHost, send }: PhaseProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eligibleKey]);
 
-  const alreadySubmitted = myId !== null && state.votes_submitted.includes(myId);
+  const alreadySubmitted = myPlayer?.ready ?? false;
   const isSubmitted = submitted || alreadySubmitted;
 
   const gameById = (id: string): Game | undefined => state.games.find((g) => g.id === id);
@@ -97,7 +97,7 @@ export function VotingPhase({ state, myId, isHost, send }: PhaseProps) {
     setSubmitted(true);
   };
 
-  const submittedCount = state.votes_submitted.length;
+  const submittedCount = state.players.filter((p) => p.ready).length;
   const totalCount = state.players.length;
 
   // The ID of the item being dragged (for styling)
@@ -226,7 +226,7 @@ export function VotingPhase({ state, myId, isHost, send }: PhaseProps) {
         <h2 className="section-title">Submissions</h2>
         <ul className="player-list">
           {state.players.map((player) => {
-            const hasSubmitted = state.votes_submitted.includes(player.id);
+            const hasSubmitted = player.ready;
             return (
               <li key={player.id} className="player-item">
                 <span className={`ready-dot ${hasSubmitted ? "ready-dot--on" : "ready-dot--off"}`}>

@@ -1,6 +1,6 @@
 import type {PhaseProps} from "../types";
 
-export function LobbyPhase({state, myId, isHost, send, getCountdown}: PhaseProps) {
+export function LobbyPhase({state, myId, isHost, send}: PhaseProps) {
 	const maxVetoes = state.max_vetoes;
 
 	return (
@@ -107,11 +107,16 @@ export function LobbyPhase({state, myId, isHost, send, getCountdown}: PhaseProps
 			<section className="card">
 				<h2 className="section-title">Players</h2>
 				<ul className="player-list">
-					{state.players.map((player) => (
+					{state.players.map((player) => {
+						const connected = player.connection_status.ty === "connected";
+						const disconnectTimeout = player.connection_status.ty === "disconnected"
+							? player.connection_status.timeout
+							: null;
+						return (
 						<li key={player.id} className="player-item">
               <span
-				  className={`connected-dot ${player.connected ? "connected-dot--on" : "connected-dot--off"}`}
-	              title={player.connected ? "Connected" : "Disconnected"}
+				  className={`connected-dot ${connected ? "connected-dot--on" : "connected-dot--off"}`}
+	              title={connected ? "Connected" : "Disconnected"}
 			  >
                 ●
               </span>
@@ -120,8 +125,8 @@ export function LobbyPhase({state, myId, isHost, send, getCountdown}: PhaseProps
 								{player.id === myId && (
 									<span className="you-label"> (you)</span>
 								)}
-								{player.disconnect_timeout != null && (
-									<span className="disconnect-timer"> ({getCountdown(player.id, player.disconnect_timeout)}s)</span>
+								{disconnectTimeout != null && (
+									<span className="disconnect-timer"> ({disconnectTimeout}s)</span>
 								)}
               </span>
 							{player.id === state.host_id && (
@@ -141,7 +146,8 @@ export function LobbyPhase({state, myId, isHost, send, getCountdown}: PhaseProps
 								</button>
 							)}
 						</li>
-					))}
+						);
+					})}
 				</ul>
 			</section>
 

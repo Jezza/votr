@@ -114,8 +114,8 @@ async fn create_lobby(
         pw => pw,
     };
 
-    let id = types::LobbyId::rand();
     let lobby = lobby::Lobby::new(public, password);
+    let id = lobby.id;
 
     // @TODO jezza - 21 Apr 2026: Replace this with a real type
     let response = serde_json::json!({ "id": id, "name": lobby.name });

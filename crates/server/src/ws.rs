@@ -368,8 +368,6 @@ async fn handle_message(
 
     match value {
         types::Incoming::SetName(msg) => {
-            let player_id = msg.player_id.as_ref().unwrap_or(&player_id);
-
             lobby.set_name(&player_id, msg.name);
         }
         types::Incoming::AddGame(msg) => {

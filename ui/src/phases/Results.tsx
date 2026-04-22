@@ -5,7 +5,7 @@ function playerName(players: PhaseProps["state"]["players"], id: string): string
 }
 
 export function ResultsPhase({state, isHost, send}: PhaseProps) {
-	const vetoedGames = state.games.filter((g) => g.vetoed_by.length > 0);
+	const vetoedGames = state.games.filter((g) => g.vetoed_by !== null);
 
 	if (!state.results || state.results.length === 0) {
 		return (
@@ -17,7 +17,7 @@ export function ResultsPhase({state, isHost, send}: PhaseProps) {
 	}
 
 	const sorted = [...state.results].sort((a, b) => a.rank - b.rank);
-	const totalVoters = state.votes_submitted.length;
+	const totalVoters = state.players.length;
 	const maxScore = sorted[0]?.score ?? 0;
 
 	// Detect draws: group by score to find ties
@@ -82,9 +82,11 @@ export function ResultsPhase({state, isHost, send}: PhaseProps) {
                   <span className="game-item-name game-item-name--crossed">
                     {game.name}
                   </span>
-									<span className="game-item-meta">
-                    vetoed by {game.vetoed_by.map((id) => playerName(state.players, id)).join(", ")}
-                  </span>
+									{game.vetoed_by !== null && (
+										<span className="game-item-meta">
+                      vetoed by {playerName(state.players, game.vetoed_by)}
+                    </span>
+									)}
 								</div>
 							</li>
 						))}
