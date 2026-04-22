@@ -1,6 +1,6 @@
 export type ConnectionStatus =
 	| { ty: "connected" }
-	| { ty: "disconnected"; timeout: number };
+	| { ty: "disconnected", at: number };
 
 export interface Player {
 	id: string;

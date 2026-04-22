@@ -55,10 +55,17 @@ export function createAppStore() {
 		});
 	};
 
-	return createStore(persist(store, {
+	const s = createStore(persist(store, {
 		name: 'votr',
 		version: 1,
 		storage: createJSONStorage(() => localStorage),
-	}))
+	}));
+
+	// persist's hydrate() uses the raw set (not api.setState), so on a cold
+	// start with empty storage the generated playerId never reaches localStorage
+	// until something else mutates state. Force a write so refresh is stable.
+	s.setState({...s.getState()}, true);
+
+	return s;
 }
 

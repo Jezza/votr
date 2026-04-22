@@ -44,7 +44,6 @@ const AppInner = React.memo(() => {
 
 	const [lobbyId, setLobbyId] = useState<string | null>(getLobbyIdFromUrl);
 	const [lobbyPassword, setLobbyPassword] = useState<string | undefined>();
-	// const [myId, setMyId] = useState<string | null>(null);
 	const [state, setState] = useState<types.ServerState | null>(null);
 	const [connected, setConnected] = useState(false);
 	const [kicked, setKicked] = useState(false);

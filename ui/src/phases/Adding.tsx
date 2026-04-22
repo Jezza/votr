@@ -1,9 +1,7 @@
 import {useState} from "react";
 import type {PhaseProps} from "../types";
-
-function playerName(players: PhaseProps["state"]["players"], id: string): string {
-	return players.find((p) => p.id === id)?.name ?? "Unknown";
-}
+import {PlayerStatus} from "../components/PlayerStatus";
+import {playerName} from "../util";
 
 export function AddingPhase({state, myId, isHost, send, myPlayer}: PhaseProps) {
 	const [gameInput, setGameInput] = useState("");
@@ -67,8 +65,8 @@ export function AddingPhase({state, myId, isHost, send, myPlayer}: PhaseProps) {
 								<div className="game-item-info">
 									<span className="game-item-name">{game.name}</span>
 									<span className="game-item-meta">
-                    by {playerName(state.players, game.suggested_by)}
-                  </span>
+										by {playerName(state.players, game.suggested_by)}
+									</span>
 								</div>
 								{game.suggested_by === myId && (
 									<button
@@ -95,24 +93,7 @@ export function AddingPhase({state, myId, isHost, send, myPlayer}: PhaseProps) {
 				</button>
 			</section>
 
-			<section className="card">
-				<h2 className="section-title">Player Status</h2>
-				<ul className="player-list">
-					{state.players.map((player) => (
-						<li key={player.id} className="player-item">
-              <span
-				  className={`ready-dot ${player.ready ? "ready-dot--on" : "ready-dot--off"}`}
-			  >
-                {player.ready ? "✓" : "○"}
-              </span>
-							<span className="player-name">
-                {player.name}
-								{player.id === myId && <span className="you-label"> (you)</span>}
-              </span>
-						</li>
-					))}
-				</ul>
-			</section>
+			<PlayerStatus players={state.players} myId={myId}/>
 
 			{isHost && (
 				<section className="card">

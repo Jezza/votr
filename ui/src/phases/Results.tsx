@@ -1,8 +1,5 @@
 import type {PhaseProps} from "../types";
-
-function playerName(players: PhaseProps["state"]["players"], id: string): string {
-	return players.find((p) => p.id === id)?.name ?? "Unknown";
-}
+import {playerName} from "../util";
 
 export function ResultsPhase({state, isHost, send}: PhaseProps) {
 	const vetoedGames = state.games.filter((g) => g.vetoed_by !== null);
@@ -20,7 +17,6 @@ export function ResultsPhase({state, isHost, send}: PhaseProps) {
 	const totalVoters = state.players.length;
 	const maxScore = sorted[0]?.score ?? 0;
 
-	// Detect draws: group by score to find ties
 	const scoreGroups = new Map<number, typeof sorted>();
 	for (const entry of sorted) {
 		const group = scoreGroups.get(entry.score) ?? [];
@@ -51,13 +47,13 @@ export function ResultsPhase({state, isHost, send}: PhaseProps) {
 								className={`results-item ${isFirst ? "results-item--first" : ""} ${isDraw ? "results-item--draw" : ""}`}
 							>
 								<div className="results-item-header">
-                  <span className="results-rank">
-                    {isFirst ? "🏆" : `#${entry.rank}`}
-                  </span>
+									<span className="results-rank">
+										{isFirst ? "🏆" : `#${entry.rank}`}
+									</span>
 									<span className="results-game-name">
-                    {entry.game_name}
+										{entry.game_name}
 										{isDraw && <span className="draw-badge">DRAW</span>}
-                  </span>
+									</span>
 									<span className="results-score">{entry.score} pts</span>
 								</div>
 								<div className="results-bar-track">
@@ -79,13 +75,13 @@ export function ResultsPhase({state, isHost, send}: PhaseProps) {
 						{vetoedGames.map((game) => (
 							<li key={game.id} className="game-item game-item--vetoed game-item--dim">
 								<div className="game-item-info">
-                  <span className="game-item-name game-item-name--crossed">
-                    {game.name}
-                  </span>
+									<span className="game-item-name game-item-name--crossed">
+										{game.name}
+									</span>
 									{game.vetoed_by !== null && (
 										<span className="game-item-meta">
-                      vetoed by {playerName(state.players, game.vetoed_by)}
-                    </span>
+											vetoed by {playerName(state.players, game.vetoed_by)}
+										</span>
 									)}
 								</div>
 							</li>

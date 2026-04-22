@@ -329,6 +329,16 @@ body {
   border-bottom: none;
 }
 
+.player-item--disconnected .player-name {
+  color: #6b7280;
+  font-style: italic;
+}
+
+.player-item--disconnected .ready-dot,
+.player-item--disconnected .connected-dot {
+  opacity: 0.5;
+}
+
 .player-name {
   flex: 1;
   color: #9aa3b4;

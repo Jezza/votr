@@ -93,7 +93,6 @@ impl Player {
 #[serde(tag = "ty", rename_all = "snake_case")]
 pub enum ConnectionStatus {
     Connected(Connected),
-    /// Seconds remaining before this player is removed (None if connected)
     Disconnected(Disconnected),
 }
 
@@ -102,8 +101,12 @@ impl ConnectionStatus {
         Self::Connected(Connected {})
     }
 
-    pub fn disconnected(timeout: u32) -> Self {
-        Self::Disconnected(Disconnected { timeout })
+    pub fn disconnected() -> Self {
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        Self::Disconnected(Disconnected { at })
     }
 }
 
@@ -112,7 +115,8 @@ pub struct Connected {}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Disconnected {
-    timeout: u32,
+    /// Unix epoch seconds at which the player disconnected.
+    pub at: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]

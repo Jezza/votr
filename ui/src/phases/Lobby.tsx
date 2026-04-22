@@ -1,46 +1,35 @@
 import type {PhaseProps} from "../types";
+import {DisconnectTimer} from "../components/DisconnectTimer";
 
 export function LobbyPhase({state, myId, isHost, send}: PhaseProps) {
 	const maxVetoes = state.max_vetoes;
 
 	return (
 		<>
-			{isHost && state.phase === "lobby" ? (
-				<section className="card">
-					<h2 className="section-title">Settings</h2>
-					<div className="veto-stepper">
-						<span className="veto-label">Vetoes per player</span>
-						<button
-							className="btn btn-outline btn-icon"
-							onClick={() => send({ty: "set_max_vetoes", count: maxVetoes - 1})}
-							disabled={maxVetoes <= 1}
-							aria-label="Decrease veto count"
-						>
-							−
-						</button>
-						<span className="veto-count">{maxVetoes}</span>
-						<button
-							className="btn btn-outline btn-icon"
-							onClick={() => send({ty: "set_max_vetoes", count: maxVetoes + 1})}
-							disabled={maxVetoes >= 10}
-							aria-label="Increase veto count"
-						>
-							+
-						</button>
-					</div>
-				</section>
-			) : (
-				<section className="card">
-					<p className="hint-text">
-						Each player gets {maxVetoes} veto{maxVetoes !== 1 ? "s" : ""}
-					</p>
-				</section>
-			)}
-
-			{isHost && (
+			{isHost ? (
 				<section className="card">
 					<h2 className="section-title">Lobby Settings</h2>
 					<div className="lobby-settings">
+						<div className="veto-stepper">
+							<span className="veto-label">Vetoes per player</span>
+							<button
+								className="btn btn-outline btn-icon"
+								onClick={() => send({ty: "set_max_vetoes", count: maxVetoes - 1})}
+								disabled={maxVetoes <= 1}
+								aria-label="Decrease veto count"
+							>
+								−
+							</button>
+							<span className="veto-count">{maxVetoes}</span>
+							<button
+								className="btn btn-outline btn-icon"
+								onClick={() => send({ty: "set_max_vetoes", count: maxVetoes + 1})}
+								disabled={maxVetoes >= 10}
+								aria-label="Increase veto count"
+							>
+								+
+							</button>
+						</div>
 						<label className="lobby-toggle">
 							<span>Public</span>
 							<input
@@ -92,14 +81,15 @@ export function LobbyPhase({state, myId, isHost, send}: PhaseProps) {
 						</button>
 					</div>
 				</section>
-			)}
-
-			{!isHost && (
+			) : (
 				<section className="card">
 					<p className="hint-text">
 						{state.lobby_name}
 						{state.lobby_locked && " · Locked"}
 						{!state.lobby_public && " · Private"}
+					</p>
+					<p className="hint-text">
+						Each player gets {maxVetoes} veto{maxVetoes !== 1 ? "s" : ""}
 					</p>
 				</section>
 			)}
@@ -109,43 +99,46 @@ export function LobbyPhase({state, myId, isHost, send}: PhaseProps) {
 				<ul className="player-list">
 					{state.players.map((player) => {
 						const connected = player.connection_status.ty === "connected";
-						const disconnectTimeout = player.connection_status.ty === "disconnected"
-							? player.connection_status.timeout
+						const disconnectedAt = player.connection_status.ty === "disconnected"
+							? player.connection_status.at
 							: null;
 						return (
-						<li key={player.id} className="player-item">
-              <span
-				  className={`connected-dot ${connected ? "connected-dot--on" : "connected-dot--off"}`}
-	              title={connected ? "Connected" : "Disconnected"}
-			  >
-                ●
-              </span>
-							<span className="player-name">
-                {player.name}
-								{player.id === myId && (
-									<span className="you-label"> (you)</span>
-								)}
-								{disconnectTimeout != null && (
-									<span className="disconnect-timer"> ({disconnectTimeout}s)</span>
-								)}
-              </span>
-							{player.id === state.host_id && (
-								<span className="host-crown" title="Host">👑</span>
-							)}
-							{isHost && player.id !== myId && (
-								<button
-									className="btn btn-icon btn-danger btn-small"
-									onClick={() => {
-										if (window.confirm(`Kick ${player.name}?`)) {
-											send({ty: "kick_player", target_id: player.id});
-										}
-									}}
-									title={`Kick ${player.name}`}
+							<li
+								key={player.id}
+								className={`player-item ${!connected ? "player-item--disconnected" : ""}`}
+							>
+								<span
+									className={`connected-dot ${connected ? "connected-dot--on" : "connected-dot--off"}`}
+									title={connected ? "Connected" : "Disconnected"}
 								>
-									✕
-								</button>
-							)}
-						</li>
+									●
+								</span>
+								<span className="player-name">
+									{player.name}
+									{player.id === myId && (
+										<span className="you-label"> (you)</span>
+									)}
+									{disconnectedAt != null && (
+										<DisconnectTimer at={disconnectedAt}/>
+									)}
+								</span>
+								{player.id === state.host_id && (
+									<span className="host-crown" title="Host">👑</span>
+								)}
+								{isHost && player.id !== myId && (
+									<button
+										className="btn btn-icon btn-danger btn-small"
+										onClick={() => {
+											if (window.confirm(`Kick ${player.name}?`)) {
+												send({ty: "kick_player", target_id: player.id});
+											}
+										}}
+										title={`Kick ${player.name}`}
+									>
+										✕
+									</button>
+								)}
+							</li>
 						);
 					})}
 				</ul>

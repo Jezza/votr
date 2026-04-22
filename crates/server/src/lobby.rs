@@ -1,10 +1,10 @@
+use crate::types;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tokio::time::Instant;
-
-use crate::types;
+use tracing::{info, warn};
 
 #[derive(Debug)]
 pub enum JoinOutcome {
@@ -121,10 +121,10 @@ impl Lobby {
         self.results = Some(results);
     }
 
-    pub fn is_host(&self, player_id: &types::PlayerId) -> bool {
+    pub fn is_host(&self, player_id: types::PlayerId) -> bool {
         self.host_id
             .as_ref()
-            .map_or(false, |host| host == player_id)
+            .map_or(false, |host| *host == player_id)
     }
 }
 
@@ -137,7 +137,7 @@ impl Lobby {
             password,
         } = info;
 
-        if let Some(outcome) = self.rejoin(player_id, name) {
+        if let Some(outcome) = self.rejoin(*player_id, name) {
             return outcome;
         }
 
@@ -149,45 +149,19 @@ impl Lobby {
             return JoinOutcome::LobbyFull;
         }
 
-        // match (self.password, password) {
-        //     (None, None) => (),
-        //     (None, Some(_)) => (),
-        //     (Some(pw), None) => {
-        //         return JoinOutcome::IncorrectPassword
-        //     }
-        //     (Some(pw), Some(user_pw)) => {
-        //         if &pw != user_pw {
-        //             return JoinOutcome::IncorrectPassword;
-        //         }
-        //     }
-        // }
-        //     // Only verify password on newcomers.
-        //     if matches!(outcome, JoinOutcome::New) {
-        //         if let Some(ref lobby_pw) = lobby.password {
-        //             let provided = password.as_deref().unwrap_or("");
-        //             if provided != lobby_pw {
-        //                 warn!(lobby_id, "player rejected: incorrect password");
-        //                 drop(lobby);
-        //                 let (mut sender, _) = socket.split();
-        //                 let msg = r#"{"type":"toast","message":"Incorrect password"}"#;
-        //                 let _ = sender.send(Message::Text(msg.into())).await;
-        //                 return;
-        //             }
-        //         }
-        //     }
-
-        // if let Some(ref pw) = self.password {
-        //     if matches!(password, Some(user_pw) if pw == user_pw) {
-        //
-        //     } else {
-        //
-        //     }
-        //     // if &pw != user_pw {
-        //     //     return JoinOutcome::IncorrectPassword;
-        //     // }
-        //
-        //
-        // }
+        match (self.password.as_deref(), password.as_deref()) {
+            (None, None) => (),
+            (None, Some(_)) | (Some(_), None) => {
+                warn!(%player_id, "player rejected: incorrect password");
+                return JoinOutcome::IncorrectPassword;
+            }
+            (Some(pw), Some(user_pw)) => {
+                if pw != user_pw {
+                    warn!(%player_id, "player rejected: incorrect password");
+                    return JoinOutcome::IncorrectPassword;
+                }
+            }
+        }
 
         self.players.push(types::Player {
             id: player_id.clone(),
@@ -247,13 +221,13 @@ impl Lobby {
     }
 
     /// Try to reconnect a previously-seen player.
-    pub fn rejoin(&mut self, id: &types::PlayerId, name: &str) -> Option<JoinOutcome> {
-        if self.kicked_ids.contains(id) {
+    pub fn rejoin(&mut self, id: types::PlayerId, name: &str) -> Option<JoinOutcome> {
+        if self.kicked_ids.contains(&id) {
             // Return early here, as we're just getting rid of them..
             return Some(JoinOutcome::Kicked);
         }
 
-        let Some(player) = self.players.iter_mut().find(|p| &p.id == id) else {
+        let Some(player) = self.players.iter_mut().find(|p| p.id == id) else {
             // No existing player found, so must be a new one.
             return None;
         };
@@ -285,13 +259,13 @@ impl Lobby {
         Some(outcome)
     }
 
-    pub fn set_name(&mut self, player_id: &types::PlayerId, mut name: String) -> bool {
+    pub fn set_name(&mut self, player_id: types::PlayerId, mut name: String) -> bool {
         crate::trim_in_place(&mut name);
         if name.is_empty() {
             return false;
         }
 
-        let found = self.players.iter_mut().find(|p| &p.id == player_id);
+        let found = self.players.iter_mut().find(|p| p.id == player_id);
         if let Some(player) = found {
             player.name = name;
             true
@@ -300,7 +274,7 @@ impl Lobby {
         }
     }
 
-    pub fn add_game(&mut self, player_id: &types::PlayerId, mut name: String) -> bool {
+    pub fn add_game(&mut self, player_id: types::PlayerId, mut name: String) -> bool {
         if self.phase != types::Phase::Adding {
             return false;
         }
@@ -319,14 +293,14 @@ impl Lobby {
         true
     }
 
-    pub fn remove_game(&mut self, player_id: &types::PlayerId, choice_id: &types::OptId) -> bool {
+    pub fn remove_game(&mut self, player_id: types::PlayerId, choice_id: types::OptId) -> bool {
         if self.phase != types::Phase::Adding {
             return false;
         }
         let opt = self
             .options
             .iter()
-            .position(|opt| &opt.id == choice_id && &opt.suggested_by == player_id);
+            .position(|opt| opt.id == choice_id && opt.suggested_by == player_id);
 
         if let Some(pos) = opt {
             self.options.remove(pos);
@@ -336,7 +310,7 @@ impl Lobby {
         }
     }
 
-    pub fn veto_game(&mut self, player_id: &types::PlayerId, game_id: &types::OptId) -> bool {
+    pub fn veto_game(&mut self, player_id: types::PlayerId, game_id: &types::OptId) -> bool {
         if self.phase != types::Phase::Vetoing {
             return false;
         }
@@ -344,7 +318,7 @@ impl Lobby {
         let used = self
             .options
             .iter()
-            .filter(|g| g.vetoed_by.as_ref().is_some_and(|id| id == player_id))
+            .filter(|g| g.vetoed_by.as_ref().is_some_and(|id| *id == player_id))
             .count() as u32;
 
         if used >= self.max_vetoes {
@@ -358,7 +332,7 @@ impl Lobby {
         }
     }
 
-    pub fn unveto_game(&mut self, player_id: &types::PlayerId, game_id: &types::OptId) -> bool {
+    pub fn unveto_game(&mut self, player_id: types::PlayerId, game_id: &types::OptId) -> bool {
         if self.phase != types::Phase::Vetoing {
             return false;
         }
@@ -367,11 +341,11 @@ impl Lobby {
             .iter_mut()
             .find(|g| &g.id == game_id)
             .map_or(false, |opt| {
-                opt.vetoed_by.take_if(|opt| opt == player_id).is_some()
+                opt.vetoed_by.take_if(|opt| *opt == player_id).is_some()
             })
     }
 
-    pub fn submit_vote(&mut self, player_id: &types::PlayerId, ranking: Vec<types::OptId>) -> bool {
+    pub fn submit_vote(&mut self, player_id: types::PlayerId, ranking: Vec<types::OptId>) -> bool {
         if self.phase != types::Phase::Voting {
             return false;
         }
@@ -385,8 +359,8 @@ impl Lobby {
             .all(|player| self.votes.contains_key(&player.id))
     }
 
-    pub fn set_ready(&mut self, player_id: &types::PlayerId, ready: bool) -> bool {
-        let player = self.players.iter_mut().find(|p| &p.id == player_id);
+    pub fn set_ready(&mut self, player_id: types::PlayerId, ready: bool) -> bool {
+        let player = self.players.iter_mut().find(|p| p.id == player_id);
 
         if let Some(player) = player {
             player.ready = ready;
@@ -396,8 +370,12 @@ impl Lobby {
         }
     }
 
-    pub fn advance_phase(&mut self) {
+    pub fn advance_phase(&mut self, player_id: types::PlayerId) {
         use types::Phase;
+
+        if !self.is_host(player_id) {
+            return;
+        }
 
         self.phase = match self.phase {
             Phase::Lobby => Phase::Adding,
@@ -425,7 +403,11 @@ impl Lobby {
         }
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self, player_id: types::PlayerId) {
+        if !self.is_host(player_id) {
+            return;
+        }
+
         self.options.clear();
         self.votes.clear();
         self.results = None;
@@ -435,49 +417,58 @@ impl Lobby {
         self.unready_players();
     }
 
-    pub fn set_max_vetoes(&mut self, count: u32) {
-        self.max_vetoes = count.max(1).min(32);
+    pub fn set_max_vetoes(&mut self, player_id: types::PlayerId, count: u32) {
+        if self.is_host(player_id) {
+            self.max_vetoes = count.max(1).min(32);
+        }
     }
 
-    pub fn kick_player(&mut self, player_id: &types::PlayerId) {
-        self.remove_player(player_id);
+    pub fn kick_player(&mut self, player_id: types::PlayerId, target_id: types::PlayerId) {
+        if !self.is_host(player_id) {
+            return;
+        }
 
-        self.kicked_ids.insert(player_id.clone());
+        self.remove_player(target_id);
+
+        self.kicked_ids.insert(target_id.clone());
     }
 
-    pub fn set_lobby_public(&mut self, player_id: &types::PlayerId, public: bool) {
+    pub fn set_lobby_public(&mut self, player_id: types::PlayerId, public: bool) {
         if self.is_host(player_id) {
             self.public = public;
         }
     }
 
-    pub fn set_lobby_password(&mut self, player_id: &types::PlayerId, password: Option<String>) {
+    pub fn set_lobby_password(&mut self, player_id: types::PlayerId, password: Option<String>) {
         if self.is_host(player_id) {
             self.password = password;
         }
     }
 
-    pub fn set_lobby_locked(&mut self, player_id: &types::PlayerId, locked: bool) {
+    pub fn set_lobby_locked(&mut self, player_id: types::PlayerId, locked: bool) {
         if self.is_host(player_id) {
             self.locked = locked;
         }
     }
 
-    pub fn close(&mut self, player_id: &types::PlayerId) -> bool {
+    pub fn close(&mut self, player_id: types::PlayerId) -> bool {
         if self.is_host(player_id) {
-            self.tx
+            let _ = self
+                .tx
                 .send(types::Outgoing::LobbyClosed(types::LobbyClosed {}))
-                .is_ok()
+                .ok();
+
+            true
         } else {
             false
         }
     }
 
-    pub fn disconnect_player(&mut self, player_id: &types::PlayerId) {
-        let found = self.players.iter_mut().find(|p| &p.id == player_id);
+    pub fn disconnect_player(&mut self, player_id: types::PlayerId) {
+        let found = self.players.iter_mut().find(|p| p.id == player_id);
 
         if let Some(player) = found {
-            player.connection_status = types::ConnectionStatus::disconnected(20);
+            player.connection_status = types::ConnectionStatus::disconnected();
         }
 
         let has_players = self.players.iter().any(|p| p.is_connected());
@@ -485,23 +476,15 @@ impl Lobby {
             self.last_empty = Some(Instant::now());
         }
 
-        if self.is_host(player_id) {
-            // Pick someone else, if there is anyone else.
-            self.host_id = self
-                .players
-                .iter()
-                .skip_while(|p| &p.id == player_id)
-                .next()
-                .map(|lucky| lucky.id.clone());
-        }
+        self.send_state();
     }
 
-    pub fn remove_player(&mut self, player_id: &types::PlayerId) {
-        self.players.retain(|p| &p.id != player_id);
-        self.votes.remove(player_id);
-        self.options.retain(|g| &g.suggested_by != player_id);
+    pub fn remove_player(&mut self, player_id: types::PlayerId) {
+        self.players.retain(|p| p.id != player_id);
+        self.votes.remove(&player_id);
+        self.options.retain(|g| g.suggested_by != player_id);
         for opt in self.options.iter_mut() {
-            opt.vetoed_by.take_if(|id| id == player_id);
+            opt.vetoed_by.take_if(|id| *id == player_id);
         }
 
         let has_players = self.players.iter().any(|p| p.is_connected());
@@ -514,8 +497,7 @@ impl Lobby {
             self.host_id = self
                 .players
                 .iter()
-                .skip_while(|p| &p.id == player_id)
-                .next()
+                .find(|p| p.id != player_id)
                 .map(|lucky| lucky.id.clone());
         }
     }

@@ -19,44 +19,50 @@ pub struct Assets;
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    // let lobbies = Arc::new(Mutex::new(LobbyManager::new()));
     let state = AppState {
         lobbies: Default::default(),
     };
 
-    // // Spawn cleanup task — every 10s, remove lobbies empty for 60s+
-    // tokio::spawn({
-    //     let lobbies = state.loggies.clone();
-    //
-    //     async move {
-    //         let mut interval =
-    //             tokio::time::interval(std::time::Duration::from_secs(LOBBY_CLEANUP_INTERVAL));
-    //         loop {
-    //             interval.tick().await;
-    //             let mut manager = lobbies.lock().await;
-    //             let mut to_remove = Vec::new();
-    //             for (id, lobby_arc) in manager.lobbies.iter() {
-    //                 if let Ok(mut lobby) = lobby_arc.try_lock() {
-    //                     if !lobby.has_connected_players() {
-    //                         if let Some(last_empty) = lobby.last_empty {
-    //                             if last_empty.elapsed().as_secs() >= LOBBY_EMPTY_TIMEOUT {
-    //                                 to_remove.push(id.clone());
-    //                             }
-    //                         } else {
-    //                             lobby.last_empty = Some(tokio::time::Instant::now());
-    //                         }
-    //                     } else {
-    //                         lobby.last_empty = None;
-    //                     }
-    //                 }
-    //             }
-    //             for id in &to_remove {
-    //                 info!("Removing empty lobby {}", id);
-    //                 manager.remove_lobby(id);
-    //             }
-    //         }
-    //     }
-    // });
+    // Spawn cleanup task — every 10s, remove lobbies empty for 60s+
+    tokio::spawn({
+        const CLEANUP_INTERVAL: u64 = 10;
+
+        let lobbies = state.lobbies.clone();
+
+        async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(CLEANUP_INTERVAL));
+            loop {
+                interval.tick().await;
+
+                let lobbies = lobbies.lock().await;
+
+                // let mut to_remove = Vec::new();
+
+                //             let mut manager = lobbies.lock().await;
+                //             let mut to_remove = Vec::new();
+                //             for (id, lobby_arc) in manager.lobbies.iter() {
+                //                 if let Ok(mut lobby) = lobby_arc.try_lock() {
+                //                     if !lobby.has_connected_players() {
+                //                         if let Some(last_empty) = lobby.last_empty {
+                //                             if last_empty.elapsed().as_secs() >= LOBBY_EMPTY_TIMEOUT {
+                //                                 to_remove.push(id.clone());
+                //                             }
+                //                         } else {
+                //                             lobby.last_empty = Some(tokio::time::Instant::now());
+                //                         }
+                //                     } else {
+                //                         lobby.last_empty = None;
+                //                     }
+                //                 }
+                //             }
+                //             for id in &to_remove {
+                //                 info!("Removing empty lobby {}", id);
+                //                 manager.remove_lobby(id);
+                //             }
+            }
+        }
+    });
 
     let app = Router::new()
         .route("/ws", get(handler))
@@ -86,10 +92,16 @@ async fn list_lobbies(State(state): State<AppState>) -> Json<Vec<types::LobbyInf
     for lobby in lobbies {
         let lobby = lobby.lock().await;
 
+        let count = lobby
+            .players
+            .iter()
+            .filter(|player| player.is_connected())
+            .count();
+
         info.push(types::LobbyInfo {
             id: lobby.id,
             name: lobby.name.clone(),
-            player_count: lobby.players.len(),
+            player_count: count,
             max_players: lobby::MAX_PLAYERS,
             has_password: lobby.password.is_some(),
             locked: lobby.locked,
