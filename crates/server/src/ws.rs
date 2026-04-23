@@ -196,6 +196,10 @@ async fn handle_socket(
         lobby.send_state();
     }
 
+    if closed {
+        return;
+    }
+
     tokio::spawn({
         let player_id = player_id;
         let lobby = lobby.clone();
@@ -204,30 +208,7 @@ async fn handle_socket(
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
             let lobby = lobby.lock().await;
-            let still_disconnected = lobby
-                .players
-                .iter()
-                .find(|p| p.id == player_id)
-                .map(|p| p.is_connected())
-                .unwrap_or_default();
 
-            if still_disconnected {
-                info!("Player {} timed out, removing host role", player_id);
-
-                if lobby.is_host(player_id) {
-
-                }
-
-            }
-
-            // if self.is_host(player_id) {
-            //     // Pick someone else, if there is anyone else.
-            //     self.host_id = self
-            //         .players
-            //         .iter()
-            //         .find(|p| &p.id != player_id)
-            //         .map(|lucky| lucky.id.clone());
-            // }
         }
     });
 }

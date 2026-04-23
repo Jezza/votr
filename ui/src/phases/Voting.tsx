@@ -1,15 +1,11 @@
-import {useEffect, useRef, useState} from "react";
+import {useEffect, useState} from "react";
 import type {Game, PhaseProps} from "../types";
 import {PlayerStatus} from "../components/PlayerStatus";
+import {useDraggableList} from "../components/useDraggableList";
 import {playerName} from "../util";
 
 function eligibleGames(games: Game[]): Game[] {
 	return games.filter((g) => g.vetoed_by === null);
-}
-
-interface DragState {
-	fromIndex: number;
-	toIndex: number;
 }
 
 export function VotingPhase({state, myId, isHost, send, myPlayer}: PhaseProps) {
@@ -18,8 +14,14 @@ export function VotingPhase({state, myId, isHost, send, myPlayer}: PhaseProps) {
 	const [ranking, setRanking] = useState<string[]>(() => eligible.map((g) => g.id));
 	const [abstaining, setAbstaining] = useState<string[]>([]);
 	const [submitted, setSubmitted] = useState(false);
-	const [drag, setDrag] = useState<DragState | null>(null);
-	const listRef = useRef<HTMLOListElement>(null);
+
+	const {
+		displayOrder: displayRanking,
+		listRef,
+		draggingItem: draggingOriginalId,
+		onDragStart,
+		listHandlers,
+	} = useDraggableList<string, HTMLOListElement>(ranking, setRanking);
 
 	useEffect(() => {
 		setRanking(eligible.map((g) => g.id));
@@ -32,52 +34,6 @@ export function VotingPhase({state, myId, isHost, send, myPlayer}: PhaseProps) {
 	const isSubmitted = submitted || alreadySubmitted;
 
 	const gameById = (id: string): Game | undefined => state.games.find((g) => g.id === id);
-
-	const displayRanking = drag
-		? (() => {
-			const next = [...ranking];
-			const [item] = next.splice(drag.fromIndex, 1);
-			next.splice(drag.toIndex, 0, item!);
-			return next;
-		})()
-		: ranking;
-
-	const getHoverIndex = (clientY: number): number => {
-		if (!listRef.current) return drag?.fromIndex ?? 0;
-		const items = Array.from(listRef.current.children) as HTMLElement[];
-		for (let i = 0; i < items.length; i++) {
-			const rect = items[i]!.getBoundingClientRect();
-			if (clientY < rect.top + rect.height / 2) return i;
-		}
-		return items.length - 1;
-	};
-
-	const handleDragStart = (e: React.PointerEvent<HTMLSpanElement>, index: number) => {
-		e.preventDefault();
-		e.currentTarget.setPointerCapture(e.pointerId);
-		setDrag({fromIndex: index, toIndex: index});
-	};
-
-	const handlePointerMove = (e: React.PointerEvent<HTMLOListElement>) => {
-		if (!drag) return;
-		const hoverIndex = getHoverIndex(e.clientY);
-		if (hoverIndex !== drag.toIndex) {
-			setDrag((prev) => (prev ? {...prev, toIndex: hoverIndex} : null));
-		}
-	};
-
-	const handlePointerUp = () => {
-		if (!drag) return;
-		if (drag.fromIndex !== drag.toIndex) {
-			setRanking((prev) => {
-				const next = [...prev];
-				const [item] = next.splice(drag.fromIndex, 1);
-				next.splice(drag.toIndex, 0, item!);
-				return next;
-			});
-		}
-		setDrag(null);
-	};
 
 	const moveToAbstaining = (gameId: string) => {
 		setRanking((prev) => prev.filter((id) => id !== gameId));
@@ -96,8 +52,6 @@ export function VotingPhase({state, myId, isHost, send, myPlayer}: PhaseProps) {
 
 	const submittedCount = state.players.filter((p) => p.ready).length;
 	const totalCount = state.players.length;
-
-	const draggingOriginalId = drag ? ranking[drag.fromIndex] : null;
 
 	return (
 		<>
@@ -131,15 +85,13 @@ export function VotingPhase({state, myId, isHost, send, myPlayer}: PhaseProps) {
 					<ol
 						className="ranking-list"
 						ref={listRef}
-						onPointerMove={handlePointerMove}
-						onPointerUp={handlePointerUp}
-						onPointerCancel={handlePointerUp}
+						{...listHandlers}
 						style={{touchAction: "none"}}
 					>
 						{displayRanking.map((gameId, index) => {
 							const game = gameById(gameId);
 							if (!game) return null;
-							const isDragging = gameId === draggingOriginalId && drag !== null;
+							const isDragging = gameId === draggingOriginalId;
 							return (
 								<li
 									key={gameId}
@@ -147,7 +99,7 @@ export function VotingPhase({state, myId, isHost, send, myPlayer}: PhaseProps) {
 								>
 									<span
 										className={`drag-handle ${isSubmitted ? "drag-handle--disabled" : ""}`}
-										onPointerDown={isSubmitted ? undefined : (e) => handleDragStart(e, index)}
+										onPointerDown={isSubmitted ? undefined : (e) => onDragStart(e, index)}
 										title="Drag to reorder"
 										aria-label="Drag handle"
 									>

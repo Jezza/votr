@@ -13,6 +13,7 @@ import {ResultsPhase} from "./phases/Results";
 import {LobbyBrowser} from "./LobbyBrowser";
 import {Toast} from "./Toast";
 import {GitHubLink} from "./GitHubLink";
+import {NameChip} from "./components/NameChip";
 import {apiBase} from "./api";
 import {
 	APP_CONTEXT,
@@ -55,9 +56,6 @@ const AppInner = React.memo(() => {
 		playerName: store.playerName,
 		setPlayerName: store.setPlayerName,
 	}));
-
-	const [editingName, setEditingName] = useState(false);
-	const [nameInput, setNameInput] = useState("");
 
 	const send = useCallback((msg: types.Outgoing) => {
 		const ws = wsRef.current;
@@ -247,20 +245,10 @@ const AppInner = React.memo(() => {
 
 	const myPlayer: types.Player | undefined = state?.players.find((p) => p.id === playerId);
 	const isHost = playerId !== null && state?.host_id === playerId;
-	// const displayName = myPlayer?.name ?? playerName ?? "…";
 
-	const handleNameCommit = () => {
-		const trimmed = nameInput.trim();
-		if (trimmed) {
-			setPlayerName(trimmed);
-			send({ty: "set_name", name: trimmed});
-		}
-		setEditingName(false);
-	};
-
-	const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-		if (e.key === "Enter") handleNameCommit();
-		if (e.key === "Escape") setEditingName(false);
+	const commitName = (name: string) => {
+		setPlayerName(name);
+		send({ty: "set_name", name});
 	};
 
 	// No lobby selected — show browser
@@ -333,29 +321,7 @@ const AppInner = React.memo(() => {
 					</div>
 					<div className="top-bar-right">
 						<span className="phase-badge">{PHASE_LABELS[state.phase] ?? state.phase}</span>
-						{editingName ? (
-							<input
-								className="name-edit-input"
-								type="text"
-								value={nameInput}
-								onChange={(e) => setNameInput(e.target.value)}
-								onKeyDown={handleNameKeyDown}
-								onBlur={handleNameCommit}
-								autoFocus
-								maxLength={32}
-							/>
-						) : (
-							<button
-								className="name-chip"
-								onClick={() => {
-									setNameInput(playerName === "…" ? "" : playerName);
-									setEditingName(true);
-								}}
-								title="Click to change your name"
-							>
-								{playerName}
-							</button>
-						)}
+						<NameChip name={playerName} onCommit={commitName}/>
 						<button
 							className="btn btn-outline btn-small"
 							onClick={() => navigateToBrowser()}

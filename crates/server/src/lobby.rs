@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tokio::time::Instant;
 use tracing::{info, warn};
+use vector_map::VecMap;
 
 #[derive(Debug)]
 pub enum JoinOutcome {
@@ -18,26 +19,26 @@ pub enum JoinOutcome {
 pub const MAX_PLAYERS: usize = 8;
 
 pub struct Lobby {
-    pub id: types::LobbyId,
-    pub tx: broadcast::Sender<types::Outgoing>,
+    id: types::LobbyId,
+    tx: broadcast::Sender<types::Outgoing>,
 
-    pub name: String,
-    pub public: bool,
-    pub password: Option<String>,
-    pub locked: bool,
+    name: String,
+    public: bool,
+    password: Option<String>,
+    locked: bool,
 
-    pub last_empty: Option<Instant>,
-    pub max_vetoes: u32,
+    last_empty: Option<Instant>,
+    max_vetoes: u32,
 
-    pub players: Vec<types::Player>,
+    players: VecMap<types::PlayerId, types::Player>,
 
-    pub phase: types::Phase,
-    pub options: Vec<types::Opt>,
-    pub votes: HashMap<types::PlayerId, Vec<types::OptId>>,
-    pub results: Option<Vec<types::VoteResult>>,
-    pub kicked_ids: HashSet<types::PlayerId>,
+    phase: types::Phase,
+    options: Vec<types::Opt>,
+    votes: HashMap<types::PlayerId, Vec<types::OptId>>,
+    results: Option<Vec<types::VoteResult>>,
+    kicked_ids: HashSet<types::PlayerId>,
 
-    pub host_id: Option<types::PlayerId>,
+    host_id: Option<types::PlayerId>,
 }
 
 impl Lobby {
@@ -51,17 +52,17 @@ impl Lobby {
             name,
             public,
             password,
-            locked: false,
+            locked: Default::default(),
             tx,
             last_empty: Some(Instant::now()),
             phase: types::Phase::Lobby,
-            players: Vec::new(),
-            options: Vec::new(),
-            results: None,
+            players: Default::default(),
+            options: Default::default(),
+            results: Default::default(),
             max_vetoes: 1,
-            votes: HashMap::new(),
-            host_id: None,
-            kicked_ids: HashSet::new(),
+            votes: Default::default(),
+            host_id: Default::default(),
+            kicked_ids: Default::default(),
         }
     }
 
@@ -129,6 +130,44 @@ impl Lobby {
 }
 
 impl Lobby {
+    pub fn send_state(&self) {
+        let Self {
+            tx: _,
+            last_empty: _,
+            votes: _,
+            kicked_ids: _,
+            id,
+            name,
+            public,
+            password,
+            locked,
+            max_vetoes,
+            players,
+            phase,
+            options,
+            results,
+            host_id,
+        } = self;
+
+        let players = players.values().cloned().collect::<Vec<_>>();
+
+        let state = types::LobbyState {
+            phase: *phase,
+            players,
+            games: options.clone(),
+            results: results.clone(),
+            host_id: *host_id,
+            max_vetoes: *max_vetoes,
+            lobby_id: *id,
+            lobby_name: name.clone(),
+            lobby_public: *public,
+            lobby_locked: *locked,
+            lobby_has_password: password.is_some(),
+        };
+
+        let _ = self.tx.send(types::Outgoing::LobbyState(state)).ok();
+    }
+
     pub fn join(&mut self, info: &types::JoinInfo) -> JoinOutcome {
         let types::JoinInfo {
             player_id,
@@ -137,7 +176,9 @@ impl Lobby {
             password,
         } = info;
 
-        if let Some(outcome) = self.rejoin(*player_id, name) {
+        let player_id = *player_id;
+
+        if let Some(outcome) = self.rejoin(player_id, name) {
             return outcome;
         }
 
@@ -163,12 +204,15 @@ impl Lobby {
             }
         }
 
-        self.players.push(types::Player {
-            id: player_id.clone(),
-            name: String::from(name),
-            connection_status: types::ConnectionStatus::connected(),
-            ready: false,
-        });
+        self.players.insert(
+            player_id,
+            types::Player {
+                id: player_id,
+                name: String::from(name),
+                connection_status: types::ConnectionStatus::connected(),
+                ready: false,
+            },
+        );
 
         let rx = self.tx.subscribe();
 
@@ -176,48 +220,12 @@ impl Lobby {
 
         // If there's no host, assign this player as host
         if self.host_id.is_none() {
-            self.host_id = Some(player_id.clone());
+            self.host_id = Some(player_id);
         }
 
         self.send_state();
 
         outcome
-    }
-
-    pub fn send_state(&self) {
-        let Self {
-            tx: _,
-            last_empty: _,
-            votes: _,
-            kicked_ids: _,
-            id,
-            name,
-            public,
-            password,
-            locked,
-            max_vetoes,
-            players,
-            phase,
-            options,
-            results,
-            host_id,
-        } = self;
-
-        let state = types::LobbyState {
-            phase: *phase,
-            players: players.clone(),
-            games: options.clone(),
-            results: results.clone(),
-            host_id: host_id.clone(),
-            max_vetoes: *max_vetoes,
-            lobby_id: *id,
-            lobby_name: name.clone(),
-            lobby_public: *public,
-            lobby_locked: *locked,
-            lobby_has_password: password.is_some(),
-        };
-
-        let _ = self.tx.send(types::Outgoing::LobbyState(state)).ok();
     }
 
     /// Try to reconnect a previously-seen player.
@@ -227,27 +235,13 @@ impl Lobby {
             return Some(JoinOutcome::Kicked);
         }
 
-        let Some(player) = self.players.iter_mut().find(|p| p.id == id) else {
-            // No existing player found, so must be a new one.
-            return None;
-        };
+        // If we can't find it, then it's not an existing player...
+        let player = self.players.get_mut(&id)?;
 
         player.name = String::from(name);
+        player.connection_status = types::ConnectionStatus::connected();
 
-        let outcome = match player.connection_status {
-            types::ConnectionStatus::Connected(_) => {
-                let rx = self.tx.subscribe();
-                // Someone is already here?
-                // It's possible that they just opened it up in a new tab...
-                JoinOutcome::Joined(rx, true)
-            }
-            types::ConnectionStatus::Disconnected(_) => {
-                let rx = self.tx.subscribe();
-                // Reconnect the player to existing slot.
-                player.connection_status = types::ConnectionStatus::connected();
-                JoinOutcome::Joined(rx, true)
-            }
-        };
+        let rx = self.tx.subscribe();
 
         // If there's no host, assign this player as host
         if self.host_id.is_none() {
@@ -256,7 +250,7 @@ impl Lobby {
 
         self.send_state();
 
-        Some(outcome)
+        Some(JoinOutcome::Joined(rx, true))
     }
 
     pub fn set_name(&mut self, player_id: types::PlayerId, mut name: String) -> bool {
@@ -265,8 +259,7 @@ impl Lobby {
             return false;
         }
 
-        let found = self.players.iter_mut().find(|p| p.id == player_id);
-        if let Some(player) = found {
+        if let Some(player) = self.players.get_mut(&player_id) {
             player.name = name;
             true
         } else {
@@ -354,15 +347,13 @@ impl Lobby {
         self.set_ready(player_id, true);
 
         self.players
-            .iter()
-            // .filter(|p| p.is_connected())
-            .all(|player| self.votes.contains_key(&player.id))
+            .keys()
+            .filter(|p| p.is_connected())
+            .all(|id| self.votes.contains_key(&id))
     }
 
     pub fn set_ready(&mut self, player_id: types::PlayerId, ready: bool) -> bool {
-        let player = self.players.iter_mut().find(|p| p.id == player_id);
-
-        if let Some(player) = player {
+        if let Some(player) = self.players.get_mut(&player_id) {
             player.ready = ready;
             true
         } else {
@@ -398,7 +389,7 @@ impl Lobby {
     }
 
     fn unready_players(&mut self) {
-        for player in self.players.iter_mut() {
+        for (_, player) in self.players.iter_mut() {
             player.ready = false;
         }
     }
@@ -464,23 +455,9 @@ impl Lobby {
         }
     }
 
-    pub fn disconnect_player(&mut self, player_id: types::PlayerId) {
-        let found = self.players.iter_mut().find(|p| p.id == player_id);
-
-        if let Some(player) = found {
-            player.connection_status = types::ConnectionStatus::disconnected();
-        }
-
-        let has_players = self.players.iter().any(|p| p.is_connected());
-        if !has_players {
-            self.last_empty = Some(Instant::now());
-        }
-
-        self.send_state();
-    }
-
+    /// Typically from the server shutting down, but this _purges_ the player.
     pub fn remove_player(&mut self, player_id: types::PlayerId) {
-        self.players.retain(|p| p.id != player_id);
+        self.players.remove(&player_id);
         self.votes.remove(&player_id);
         self.options.retain(|g| g.suggested_by != player_id);
         for opt in self.options.iter_mut() {
@@ -494,11 +471,38 @@ impl Lobby {
 
         if self.is_host(player_id) {
             // Pick someone else, if there is anyone else.
-            self.host_id = self
-                .players
-                .iter()
-                .find(|p| p.id != player_id)
-                .map(|lucky| lucky.id.clone());
+            self.host_id = self.players.keys().copied().next();
+        }
+    }
+
+    /// This removes the active nature of a player.
+    pub fn disconnect_player(&mut self, player_id: types::PlayerId) {
+        if let Some(player) = self.players.get_mut(&player_id) {
+            player.connection_status = types::ConnectionStatus::disconnected();
+        }
+
+        let has_players = self.players.values().any(|p| p.is_connected());
+        if !has_players {
+            self.last_empty = Some(Instant::now());
+        }
+
+        self.send_state();
+    }
+
+    pub fn timeout_player(&mut self, player_id: types::PlayerId) {
+        let still_disconnected = self
+            .players
+            .get(&player_id)
+            .map(|p| p.is_connected())
+            .unwrap_or_default();
+
+        if still_disconnected {
+            info!("Player {} timed out, removing host role", player_id);
+
+            if self.is_host(player_id) {
+                // Pick someone else, if there is anyone else.
+                self.host_id = self.players.keys().copied().next();
+            }
         }
     }
 }

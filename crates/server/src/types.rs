@@ -187,19 +187,25 @@ impl From<LobbyState> for Outgoing {
 #[serde(tag = "ty", rename_all = "snake_case")]
 pub enum Incoming {
     SetName(SetName),
+
     AddGame(AddGame),
     RemoveGame(RemoveGame),
+
     VetoGame(VetoGame),
     UnvetoGame(UnvetoGame),
+
     SubmitVote(SubmitVote),
     SetReady(SetReady),
+
     AdvancePhase,
     ResetSession,
-    SetMaxVetoes(SetMaxVetoes),
     KickPlayer(KickPlayer),
+
+    SetMaxVetoes(SetMaxVetoes),
     SetLobbyPublic(SetLobbyPublic),
     SetLobbyPassword(SetLobbyPassword),
     SetLobbyLocked(SetLobbyLocked),
+
     CloseLobby,
 }
 
