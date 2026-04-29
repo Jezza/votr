@@ -1,119 +1,136 @@
-mod lobby;
-mod session;
-mod ws;
-
-use axum::{
-    extract::State,
-    http::StatusCode,
-    routing::get,
-    Json, Router,
-};
-use lobby::{LobbyManager, LOBBY_CLEANUP_INTERVAL, LOBBY_EMPTY_TIMEOUT};
+use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
+// use lobby::{LOBBY_CLEANUP_INTERVAL, LOBBY_EMPTY_TIMEOUT, LobbyManager};
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 use tracing::info;
-use ws::{ws_handler, AppState};
+use ws::{AppState, handler};
+
+mod lobby;
+mod types;
+mod ws;
 
 #[derive(rust_embed::RustEmbed, Clone, Copy)]
 #[folder = "../../ui/dist"]
 pub struct Assets;
 
-#[derive(Deserialize)]
-struct CreateLobbyRequest {
-    public: Option<bool>,
-    password: Option<String>,
-}
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let lobbies = Arc::new(Mutex::new(LobbyManager::new()));
     let state = AppState {
-        lobbies: lobbies.clone(),
+        lobbies: Default::default(),
     };
 
     // Spawn cleanup task — every 10s, remove lobbies empty for 60s+
-    let cleanup_lobbies = lobbies.clone();
-    tokio::spawn(async move {
-        let mut interval =
-            tokio::time::interval(std::time::Duration::from_secs(LOBBY_CLEANUP_INTERVAL));
-        loop {
-            interval.tick().await;
-            let mut manager = cleanup_lobbies.lock().await;
-            let mut to_remove = Vec::new();
-            for (id, lobby_arc) in manager.lobbies.iter() {
-                if let Ok(mut lobby) = lobby_arc.try_lock() {
-                    if !lobby.has_connected_players() {
-                        if let Some(last_empty) = lobby.last_empty {
-                            if last_empty.elapsed().as_secs() >= LOBBY_EMPTY_TIMEOUT {
-                                to_remove.push(id.clone());
-                            }
-                        } else {
-                            lobby.last_empty = Some(tokio::time::Instant::now());
-                        }
-                    } else {
-                        lobby.last_empty = None;
-                    }
-                }
-            }
-            for id in &to_remove {
-                info!("Removing empty lobby {}", id);
-                manager.remove_lobby(id);
+    tokio::spawn({
+        const CLEANUP_INTERVAL: u64 = 10;
+
+        let lobbies = state.lobbies.clone();
+
+        async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(CLEANUP_INTERVAL));
+            loop {
+                interval.tick().await;
+
+                let lobbies = lobbies.lock().await;
+
+                // let mut to_remove = Vec::new();
+
+                //             let mut manager = lobbies.lock().await;
+                //             let mut to_remove = Vec::new();
+                //             for (id, lobby_arc) in manager.lobbies.iter() {
+                //                 if let Ok(mut lobby) = lobby_arc.try_lock() {
+                //                     if !lobby.has_connected_players() {
+                //                         if let Some(last_empty) = lobby.last_empty {
+                //                             if last_empty.elapsed().as_secs() >= LOBBY_EMPTY_TIMEOUT {
+                //                                 to_remove.push(id.clone());
+                //                             }
+                //                         } else {
+                //                             lobby.last_empty = Some(tokio::time::Instant::now());
+                //                         }
+                //                     } else {
+                //                         lobby.last_empty = None;
+                //                     }
+                //                 }
+                //             }
+                //             for id in &to_remove {
+                //                 info!("Removing empty lobby {}", id);
+                //                 manager.remove_lobby(id);
+                //             }
             }
         }
     });
 
     let app = Router::new()
-        .route("/ws", get(ws_handler))
+        .route("/ws", get(handler))
         .route("/api/lobbies", get(list_lobbies).post(create_lobby))
         .fallback_service(axum_embed::ServeEmbed::<Assets>::new())
         .layer(CorsLayer::permissive())
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await.unwrap();
-    info!("listening on http://0.0.0.0:3001");
+    info!(
+        "listening on {}",
+        listener
+            .local_addr()
+            .expect("unable to discover local addr")
+    );
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn list_lobbies(State(state): State<AppState>) -> Json<Vec<lobby::LobbyInfo>> {
-    let manager = state.lobbies.lock().await;
-    let mut lobbies = Vec::new();
-    for lobby_arc in manager.lobbies.values() {
-        if let Ok(lobby) = lobby_arc.try_lock() {
-            if lobby.public {
-                lobbies.push(lobby::LobbyInfo {
-                    id: lobby.id.clone(),
-                    name: lobby.name.clone(),
-                    player_count: lobby.session.players.iter().filter(|p| p.connected).count(),
-                    max_players: session::MAX_PLAYERS,
-                    has_password: lobby.password.is_some(),
-                    locked: lobby.locked,
-                    phase: format!("{:?}", lobby.session.phase).to_lowercase(),
-                });
-            }
+async fn list_lobbies(State(state): State<AppState>) -> Json<Vec<types::LobbyInfo>> {
+    let lobbies: Vec<_> = {
+        let lobbies = state.lobbies.lock().await;
+        lobbies.values().cloned().collect()
+    };
+
+    let mut info = vec![];
+
+    for lobby in lobbies {
+        let lobby = lobby.lock().await;
+        if lobby.public() {
+            info.push(lobby.as_info());
         }
     }
-    Json(lobbies)
+    Json(info)
 }
 
 async fn create_lobby(
     State(state): State<AppState>,
-    Json(req): Json<CreateLobbyRequest>,
+    Json(req): Json<types::CreateLobbyRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let mut manager = state.lobbies.lock().await;
-    let password = req.password.and_then(|p| {
-        let trimmed: String = p.chars().take(64).collect();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
+    let public = req.public.unwrap_or(true);
+    let password = match req.password {
+        Some(pw) if pw.len() > 64 => {
+            return Err(StatusCode::BAD_REQUEST);
         }
-    });
-    match manager.create_lobby(req.public.unwrap_or(true), password) {
-        Ok((id, name)) => Ok(Json(serde_json::json!({ "id": id, "name": name }))),
-        Err(_) => Err(StatusCode::TOO_MANY_REQUESTS),
+        Some(pw) if pw.is_empty() => {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        pw => pw,
+    };
+
+    let lobby = lobby::Lobby::new(public, password);
+    let id = lobby.id();
+
+    // @TODO jezza - 21 Apr 2026: Replace this with a real type
+    let response = serde_json::json!({ "id": id, "name": lobby.name() });
+
+    {
+        let mut lobbies = state.lobbies.lock().await;
+        lobbies.insert(id, Arc::new(Mutex::new(lobby)));
     }
+
+    Ok(Json(response))
+}
+
+fn trim_in_place(s: &mut String) {
+    let trimmed = s.trim();
+    let start = trimmed.as_ptr() as usize - s.as_ptr() as usize;
+    let len = trimmed.len();
+    s.truncate(start + len);
+    s.drain(..start);
 }

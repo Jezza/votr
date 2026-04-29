@@ -44,7 +44,7 @@ const ANIMALS = [
   "Tardigrade",
 ];
 
-export function generateSillyName(): string {
+export function generateSeriousName(): string {
   const adjective = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]!;
   const animal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)]!;
   return `${adjective}${animal}`;
